@@ -360,12 +360,9 @@ class App:
         box.rowconfigure(1, weight=0)
 
         self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
-        self.table_scroll = ttk.Scrollbar(body, orient="vertical", command=self.table_canvas.yview)
         self.table = tk.Frame(self.table_canvas, bg="#FFFFFF")
         self.table_window = self.table_canvas.create_window((0, 0), window=self.table, anchor="nw")
-        self.table_canvas.configure(yscrollcommand=self.table_scroll.set)
         self.table_canvas.pack(side="left", fill="both", expand=True)
-        self.table_scroll.pack(side="right", fill="y")
 
         def on_table_configure(_event=None):
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
@@ -460,7 +457,7 @@ class App:
             while w is not None:
                 # Let the quotation-items scrollbar handle mouse-wheel events
                 # while the pointer is inside the product table.
-                if w in (getattr(self, "table_canvas", None), getattr(self, "table_scroll", None)):
+                if w == getattr(self, "table_canvas", None):
                     return
                 if w == self.page_canvas:
                     self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
@@ -505,7 +502,7 @@ class App:
             return
         # 16 standard rows fit in the quotation-items area. Extra rows use the
         # table's internal scrollbar. This height is deliberately constant.
-        table_height = 540
+        table_height = 460
         try:
             self.table_body.configure(height=table_height)
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
