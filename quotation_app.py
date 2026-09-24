@@ -114,6 +114,8 @@ def db():
     qcols = {r[1] for r in c.execute("PRAGMA table_info(quotations)").fetchall()}
     if "prepared_by" not in qcols:
         c.execute("ALTER TABLE quotations ADD COLUMN prepared_by TEXT DEFAULT ''")
+    if "invoice_title" not in qcols:
+        c.execute("ALTER TABLE quotations ADD COLUMN invoice_title TEXT DEFAULT ''")
     defaults = {
         "cod_first_kg": "450",
         "cod_additional_kg": "100",
@@ -309,6 +311,8 @@ class App:
             c = db(); c.execute("INSERT OR IGNORE INTO users(name,active) VALUES(?,1)", ("Admin",)); c.commit(); c.close()
             users = ["Admin"]
         self.prepared_by = tk.StringVar(value=users[0])
+        self.invoice_title = tk.StringVar()
+        self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_invoice", "1") == "1")
 
         fields = [("Quotation No.", self.qno), ("Customer Name", self.customer),
                   ("WhatsApp / Phone", self.phone), ("Date", self.qdate)]
@@ -332,6 +336,13 @@ class App:
                                            values=users, state="readonly")
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
         self.prepared_combo.bind("<Return>", lambda event: self.focus_first_description())
+
+        # Invoice Title appears directly below Customer Name and is searchable in history.
+        tk.Label(info, text="INVOICE TITLE", bg="#FFFFFF", fg="#506176",
+                 font=("Segoe UI", 8, "bold")).grid(row=2, column=2, sticky="w", padx=7, pady=(3, 0))
+        self.invoice_title_entry = ttk.Entry(info, textvariable=self.invoice_title)
+        self.invoice_title_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
+        self.invoice_title_entry.bind("<Return>", lambda event: self.focus_first_description())
 
         # ---------- Quotation workspace ----------
         # The quotation table and internal calculation panel share the same
@@ -479,6 +490,14 @@ class App:
                              relief="flat", padx=15, pady=10, cursor="hand2")
         calc_btn.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=2)
 
+        self.predeposit_check = ttk.Checkbutton(
+            calc_body,
+            text="Show Pre Deposit COD Amount on Invoice PDF",
+            variable=self.show_predeposit_cod,
+            command=lambda: set_setting("show_predeposit_cod_invoice", "1" if self.show_predeposit_cod.get() else "0")
+        )
+        self.predeposit_check.grid(row=calc_row + 1, column=0, columnspan=2, sticky="w", pady=(5, 2))
+
         # Final section: Total Cost and Requested Profit.
         calc_row += 1
         sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
@@ -596,8 +615,6 @@ class App:
             elif j == 3:
                 # Quantity greater than 1 is visually emphasized.
                 e.bind("<KeyRelease>", lambda event, var=q, widget=e: self._qty_keyrelease(var, widget))
-            else:
-                e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 1, 3))
             elif j == 3:
@@ -874,6 +891,7 @@ class App:
             self.num(self.final180.get()),
             self.num(self.weight.get()),
             self.prepared_by.get().strip(),
+            self.invoice_title.get().strip(),
             datetime.now().isoformat()
         )
 
@@ -881,7 +899,7 @@ class App:
             c.execute(
                 """UPDATE quotations
                    SET qno=?,customer=?,phone=?,date=?,profit=?,
-                       warranty90=?,warranty180=?,weight=?,prepared_by=?,created_at=?
+                       warranty90=?,warranty180=?,weight=?,prepared_by=?,invoice_title=?,created_at=?
                    WHERE id=?""",
                 values + (self.editing_id,)
             )
@@ -891,8 +909,8 @@ class App:
         else:
             c.execute(
                 """INSERT INTO quotations
-                   (qno,customer,phone,date,profit,warranty90,warranty180,weight,prepared_by,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                   (qno,customer,phone,date,profit,warranty90,warranty180,weight,prepared_by,invoice_title,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 values
             )
             qid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -1255,6 +1273,7 @@ class App:
         invoice_date = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         customer = tk.StringVar(value=self.customer.get().strip())
         phone = tk.StringVar(value=self.phone.get().strip())
+        invoice_title = tk.StringVar(value=self.invoice_title.get().strip())
         fields = [
             ("Invoice No.", invoice_no), ("Customer Name", customer),
             ("WhatsApp / Phone", phone), ("Date", invoice_date)
@@ -1263,6 +1282,8 @@ class App:
             ttk.Label(info, text=lab).grid(row=0, column=i*2, sticky="w", padx=5)
             ttk.Entry(info, textvariable=var, width=24).grid(row=0, column=i*2+1, sticky="ew", padx=5)
             info.columnconfigure(i*2+1, weight=1)
+        ttk.Label(info, text="Invoice Title").grid(row=1, column=0, sticky="w", padx=5, pady=(6, 0))
+        ttk.Entry(info, textvariable=invoice_title).grid(row=1, column=1, columnspan=3, sticky="ew", padx=5, pady=(6, 0))
 
         box = ttk.LabelFrame(win, text="Invoice Items", padding=8)
         box.pack(fill="both", expand=True, padx=12, pady=5)
@@ -1286,9 +1307,22 @@ class App:
             ttk.Label(box, textvariable=av, anchor="e").grid(row=idx, column=4, padx=5, pady=2, sticky="ew")
             invoice_rows.append((pv, dv, qv, uv, av))
 
+        # Service Charger is always a separate invoice line, editable, default LKR 1,500.
+        sc_pv = tk.StringVar(value="SERVICE CHARGER")
+        sc_dv = tk.StringVar(value="SERVICE CHARGE")
+        sc_qv = tk.StringVar(value="1")
+        sc_uv = tk.StringVar(value="1500")
+        sc_av = tk.StringVar(value="LKR 0.00")
+        service_row_index = len(invoice_rows) + 1
+        ttk.Entry(box, textvariable=sc_pv, state="readonly").grid(row=service_row_index, column=0, padx=2, pady=2, sticky="ew")
+        ttk.Entry(box, textvariable=sc_dv, justify="center").grid(row=service_row_index, column=1, padx=2, pady=2, sticky="ew")
+        ttk.Entry(box, textvariable=sc_qv, justify="center").grid(row=service_row_index, column=2, padx=2, pady=2, sticky="ew")
+        ttk.Entry(box, textvariable=sc_uv, justify="right").grid(row=service_row_index, column=3, padx=2, pady=2, sticky="ew")
+        ttk.Label(box, textvariable=sc_av, anchor="e").grid(row=service_row_index, column=4, padx=5, pady=2, sticky="ew")
+
         total_var = tk.StringVar(value="LKR 0.00")
-        ttk.Label(box, text="TOTAL", font=("Segoe UI", 10, "bold")).grid(row=len(invoice_rows)+1, column=3, sticky="e", padx=5, pady=10)
-        ttk.Label(box, textvariable=total_var, font=("Segoe UI", 11, "bold"), anchor="e").grid(row=len(invoice_rows)+1, column=4, sticky="ew", padx=5, pady=10)
+        ttk.Label(box, text="TOTAL", font=("Segoe UI", 10, "bold")).grid(row=service_row_index+1, column=3, sticky="e", padx=5, pady=10)
+        ttk.Label(box, textvariable=total_var, font=("Segoe UI", 11, "bold"), anchor="e").grid(row=service_row_index+1, column=4, sticky="ew", padx=5, pady=10)
 
         def calc_invoice(*_):
             total = 0.0
@@ -1298,11 +1332,16 @@ class App:
                 amount = qty * unit
                 total += amount
                 av.set(money(amount))
+            sc_amount = self.num(sc_qv.get()) * self.num(sc_uv.get())
+            total += sc_amount
+            sc_av.set(money(sc_amount))
             total_var.set(money(total))
 
         for row in invoice_rows:
             row[2].trace_add("write", calc_invoice)
             row[3].trace_add("write", calc_invoice)
+        sc_qv.trace_add("write", calc_invoice)
+        sc_uv.trace_add("write", calc_invoice)
         calc_invoice()
 
         note = ttk.Label(win, text="English invoice format for Epson LQ-300+ continuous paper.", foreground=GREY)
@@ -1310,6 +1349,56 @@ class App:
 
         actions = ttk.Frame(win, padding=10)
         actions.pack(fill="x")
+
+        def save_invoice_pdf():
+            calc_invoice()
+            pdf_dir = get_pdf_dir()
+            filename = os.path.join(pdf_dir, f"{invoice_no.get()}_INVOICE.pdf")
+            styles = getSampleStyleSheet()
+            normal = ParagraphStyle("inv_normal", parent=styles["BodyText"], fontSize=8.5, leading=10.5, textColor=colors.HexColor(DARK_BLUE))
+            small = ParagraphStyle("inv_small", parent=normal, fontSize=7.5, leading=9)
+            header_style = ParagraphStyle("inv_header", parent=styles["Heading1"], fontSize=20, leading=22, textColor=colors.HexColor(DARK_BLUE))
+            doc = SimpleDocTemplate(filename, pagesize=A4, rightMargin=12*mm, leftMargin=12*mm, topMargin=10*mm, bottomMargin=10*mm, title=f"Invoice {invoice_no.get()}", author="Bluetech Computers")
+            story = []
+            story.append(Paragraph("BLUETECH COMPUTERS", header_style))
+            story.append(Paragraph("Computer Sales | Repairs | Upgrades", normal))
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("077 633 7942 &nbsp;&nbsp; 074 394 6233<br/>230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama", small))
+            story.append(Spacer(1, 7))
+            info_data = [[Paragraph("<b>INVOICE</b>", header_style), Paragraph(f"<b>Invoice No</b> : {invoice_no.get()}<br/><b>Date</b> : {invoice_date.get()}<br/><b>Customer</b> : {customer.get()}<br/><b>Phone / WhatsApp</b> : {phone.get()}<br/><b>Invoice Title</b> : {invoice_title.get() or '-'}", normal)]]
+            info_t = Table(info_data, colWidths=[80*mm, 100*mm])
+            info_t.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(1,0),(1,0),colors.HexColor("#F6FAFF")),("BOX",(1,0),(1,0),0.7,colors.HexColor("#B8D8F5")),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
+            story.append(info_t)
+            story.append(Spacer(1, 7))
+            if invoice_title.get().strip():
+                story.append(Paragraph(f"<b>{invoice_title.get().strip()}</b>", ParagraphStyle("it", parent=normal, fontSize=11, leading=13, textColor=colors.HexColor(BLUE))))
+                story.append(Spacer(1, 4))
+            data = [["#", "PRODUCT", "PRODUCT DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]]
+            for i, (pv,dv,qv,uv,av) in enumerate(invoice_rows, 1):
+                prod = pv.get().strip().upper()
+                if prod == "PSU": prod = "POWER SUPPLY UNIT"
+                elif prod == "HDD": prod = "HARD DISK DRIVE"
+                data.append([str(i), prod, dv.get().strip().upper(), str(self.num(qv.get())), money(self.num(uv.get())), money(self.num(qv.get())*self.num(uv.get()))])
+            data.append([str(len(invoice_rows)+1), "SERVICE CHARGER", sc_dv.get().strip().upper(), str(self.num(sc_qv.get())), money(self.num(sc_uv.get())), money(self.num(sc_qv.get())*self.num(sc_uv.get()))])
+            t=Table(data, colWidths=[9*mm, 42*mm, 70*mm, 14*mm, 22*mm, 23*mm], repeatRows=1)
+            t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(BLUE)),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8.2),("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#B7C3D0")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(2,0),(2,-1),"CENTER"),("ALIGN",(3,0),(-1,-1),"RIGHT"),("ALIGN",(0,0),(0,-1),"CENTER"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F3F7FB")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+            story.append(t)
+            story.append(Spacer(1,7))
+            story.append(Paragraph(f"<b>TOTAL : {total_var.get()}</b>", ParagraphStyle("total", parent=normal, fontSize=12, alignment=TA_RIGHT, textColor=colors.HexColor(DARK_BLUE))))
+            if self.show_predeposit_cod.get() and self.num(self.pre_deposit_cod.get()) > 0:
+                story.append(Spacer(1,5))
+                cod_box=Table([[Paragraph("Pre Deposit COD Amount", small), Paragraph(money(self.num(self.pre_deposit_cod.get())), ParagraphStyle("cod", parent=normal, fontSize=9, alignment=TA_RIGHT, textColor=colors.HexColor(DARK_BLUE))) ]], colWidths=[45*mm,35*mm])
+                cod_box.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#FFF8E8")),("BOX",(0,0),(-1,-1),0.7,colors.HexColor("#F0B429")),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
+                story.append(cod_box)
+            story.append(Spacer(1,8))
+            story.append(Paragraph("Thank you for your business!", ParagraphStyle("thanks", parent=normal, fontSize=10, alignment=TA_CENTER)))
+            doc.build(story)
+            try:
+                if sys.platform.startswith("win"): os.startfile(filename)
+                elif sys.platform == "darwin": subprocess.Popen(["open", filename])
+                else: subprocess.Popen(["xdg-open", filename])
+            except Exception: pass
+            messagebox.showinfo("Invoice PDF", f"Invoice PDF created:\n{filename}", parent=win)
 
         def print_invoice():
             calc_invoice()
@@ -1345,17 +1434,26 @@ class App:
                 line(f"INVOICE: {invoice_no.get():<22} DATE: {invoice_date.get()}")
                 line(f"CUSTOMER: {customer.get()[:60]}")
                 line(f"PHONE   : {phone.get()[:60]}")
+                line(f"INVOICE TITLE: {invoice_title.get()[:52]}")
                 line("-" * 80)
                 line(f"{'PRODUCT':<22} {'DESCRIPTION':<27} {'QTY':>5} {'UNIT PRICE':>11} {'AMOUNT':>12}")
                 line("-" * 80)
                 total = 0.0
                 for pv, dv, qv, uv, av in invoice_rows:
                     qty = self.num(qv.get()); unit = self.num(uv.get()); amount = qty * unit; total += amount
-                    product_text = pv.get().strip()[:22]
-                    desc_text = dv.get().strip()[:27]
+                    product_text = pv.get().strip().upper()
+                    if product_text == "PSU": product_text = "POWER SUPPLY UNIT"
+                    elif product_text == "HDD": product_text = "HARD DISK DRIVE"
+                    product_text = product_text[:22]
+                    desc_text = dv.get().strip().upper()[:27]
                     line(f"{product_text:<22} {desc_text:<27} {qty:>5g} {unit:>11.2f} {amount:>12.2f}")
+                sc_qty = self.num(sc_qv.get()); sc_unit = self.num(sc_uv.get()); sc_amount = sc_qty * sc_unit
+                line(f"{'SERVICE CHARGER':<22} {sc_dv.get().strip().upper()[:27]:<27} {sc_qty:>5g} {sc_unit:>11.2f} {sc_amount:>12.2f}")
+                total += sc_amount
                 line("-" * 80)
                 line(f"{'TOTAL':>68} {total:>12.2f}")
+                if self.show_predeposit_cod.get() and self.num(self.pre_deposit_cod.get()) > 0:
+                    line(f"PRE DEPOSIT COD AMOUNT: {self.num(self.pre_deposit_cod.get()):.2f}")
                 line("=" * 80)
                 line("Warranty: As stated on the quotation / invoice.")
                 line("Thank you for your business!")
@@ -1377,6 +1475,7 @@ class App:
 
             ttk.Button(printer_win, text="PRINT", command=do_print).pack(pady=18)
 
+        ttk.Button(actions, text="SAVE INVOICE PDF", command=save_invoice_pdf).pack(side="right", padx=5)
         ttk.Button(actions, text="PRINT INVOICE", command=print_invoice).pack(side="right", padx=5)
         ttk.Button(actions, text="CLOSE", command=win.destroy).pack(side="right", padx=5)
 
@@ -1555,19 +1654,19 @@ class App:
         search_entry.pack(side="left", fill="x", expand=True)
         ttk.Label(
             search_row,
-            text="Name / Quotation No. / Phone / Date"
+            text="Name / Invoice Title / Quotation No. / Phone / Date"
         ).pack(side="left", padx=10)
 
         tree = ttk.Treeview(
             win,
-            columns=("q", "customer", "phone", "date", "profit", "p90", "p180"),
+            columns=("q", "customer", "title", "phone", "date", "profit", "p90", "p180"),
             show="headings"
         )
         headings = (
-            "Quotation No.", "Customer", "Phone", "Date",
+            "Quotation No.", "Customer", "Invoice Title", "Phone", "Date",
             "Requested Profit", "3 Months", "6 Months"
         )
-        widths = (155, 190, 135, 105, 135, 135, 135)
+        widths = (145, 170, 170, 125, 100, 125, 125, 125)
 
         for col, h, width in zip(tree["columns"], headings, widths):
             tree.heading(col, text=h)
@@ -1577,7 +1676,7 @@ class App:
 
         c = db()
         rows = c.execute(
-            """SELECT id,qno,customer,phone,date,profit,warranty90,warranty180,prepared_by
+            """SELECT id,qno,customer,invoice_title,phone,date,profit,warranty90,warranty180,prepared_by
                FROM quotations ORDER BY id DESC"""
         ).fetchall()
         c.close()
@@ -1588,9 +1687,9 @@ class App:
                 tree.delete(item)
 
             for row in rows:
-                qid, qno, customer, phone, date, profit, p90, p180, prepared_by = row
+                qid, qno, customer, invoice_title, phone, date, profit, p90, p180, prepared_by = row
                 hay = " ".join([
-                    str(qno or ""), str(customer or ""),
+                    str(qno or ""), str(customer or ""), str(invoice_title or ""),
                     str(phone or ""), str(date or "")
                 ]).lower()
 
@@ -1600,7 +1699,7 @@ class App:
                 tree.insert(
                     "", "end", iid=str(qid),
                     values=(
-                        qno, customer, phone, date,
+                        qno, customer, invoice_title, phone, date,
                         money(profit), money(p90), money(p180)
                     )
                 )
@@ -1651,7 +1750,7 @@ class App:
         c = db()
         q = c.execute(
             """SELECT id,qno,customer,phone,date,profit,
-                      warranty90,warranty180,weight,prepared_by
+                      warranty90,warranty180,weight,prepared_by,invoice_title
                FROM quotations WHERE id=?""",
             (qid,)
         ).fetchone()
@@ -1684,6 +1783,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
+        self.invoice_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -1721,6 +1821,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
+        self.invoice_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -1756,6 +1857,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
+        self.invoice_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -1792,6 +1894,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
+        self.invoice_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
