@@ -197,7 +197,7 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
 
         doc = SimpleDocTemplate(
             path, pagesize=page,
-            leftMargin=8*mm, rightMargin=8*mm,
+            leftMargin=0.5*72, rightMargin=8*mm,
             topMargin=5*mm, bottomMargin=5*mm
         )
 
@@ -331,7 +331,29 @@ def show_job_history(app, db, get_pdf_dir):
         sel=tree.selection()
         if not sel: messagebox.showwarning('Job Chit','Select a job chit.',parent=win); return
         open_job_chit(app,db,get_pdf_dir,int(sel[0]))
+
+    def delete_selected():
+        sel=tree.selection()
+        if not sel:
+            messagebox.showwarning('Job Chit','Select a job chit to delete.',parent=win)
+            return
+        jid = int(sel[0])
+        job_no = tree.item(sel[0], 'values')[0]
+        if not messagebox.askyesno(
+            'Delete Job Chit',
+            f'Delete Job Chit {job_no}?\n\nThis cannot be undone.',
+            parent=win
+        ):
+            return
+        con = db()
+        try:
+            con.execute('DELETE FROM job_chits WHERE id=?', (jid,))
+            con.commit()
+        finally:
+            con.close()
+        refresh()
     search.trace_add('write',refresh); refresh()
     ttk.Button(win,text='OPEN / EDIT / PRINT',command=selected).pack(side='left',padx=12,pady=8)
+    ttk.Button(win,text='DELETE JOB CHIT',command=delete_selected).pack(side='left',padx=12,pady=8)
     ttk.Button(win,text='CLOSE',command=win.destroy).pack(side='right',padx=12,pady=8)
     tree.bind('<Double-1>',lambda e:selected())
