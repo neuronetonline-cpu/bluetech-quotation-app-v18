@@ -284,6 +284,8 @@ class App:
         main_area.pack(fill="both", expand=True)
 
         self.page_canvas = tk.Canvas(main_area, bg="#F3F7FC", highlightthickness=0, bd=0)
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", lambda ev: canvas.yview_scroll(int(-ev.delta / 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
         self.page_scroll = ttk.Scrollbar(main_area, orient="vertical", command=self.page_canvas.yview)
         self.page_content = tk.Frame(self.page_canvas, bg="#F3F7FC")
         self.page_window = self.page_canvas.create_window((0, 0), window=self.page_content, anchor="nw")
