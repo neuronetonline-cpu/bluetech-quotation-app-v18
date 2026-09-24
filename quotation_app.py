@@ -452,6 +452,7 @@ class App:
                     ent.bind("<Return>", lambda event: self.focus_weight_entry())
                 elif lab == "Weight (KG)":
                     self.weight_entry = ent
+                    ent.bind("<Return>", lambda event: self.focus_profit_entry())
             else:
                 ent = tk.Entry(card, textvariable=var, justify="right",
                                font=("Segoe UI", 14 if is_final_3m else 9, "bold"),
@@ -579,7 +580,14 @@ class App:
                          highlightcolor="#0878D1")
             e.grid(row=r + 1, column=j, padx=2, pady=2, sticky="ew", ipady=3)
             widgets.append(e)
-            e.bind("<KeyRelease>", lambda e: self.recalc())
+            if j == 1:
+                # Main product names are always shown in CAPITAL letters.
+                e.bind("<KeyRelease>", lambda event, var=p, widget=e: self._product_keyrelease(var, widget))
+            elif j == 3:
+                # Quantity greater than 1 is visually emphasized.
+                e.bind("<KeyRelease>", lambda event, var=q, widget=e: self._qty_keyrelease(var, widget))
+            else:
+                e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
                 # DESCRIPTION -> same field in the next row
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 1))
@@ -605,6 +613,23 @@ class App:
             self.table.columnconfigure(col, weight=weight, minsize=minsize)
         if not silent:
             self.recalc()
+
+    def _product_keyrelease(self, var, widget):
+        value = var.get()
+        upper = value.upper()
+        if value != upper:
+            var.set(upper)
+            widget.icursor(tk.END)
+        widget.configure(font=("Segoe UI", 9, "bold"))
+        self.recalc()
+
+    def _qty_keyrelease(self, var, widget):
+        try:
+            qty = float(str(var.get()).replace(",", "").strip() or 0)
+        except Exception:
+            qty = 0
+        widget.configure(font=("Segoe UI", 9, "bold") if qty > 1 else ("Segoe UI", 9))
+        self.recalc()
 
     def focus_next_row_field(self, widget, column):
         """Move Enter-key focus to the same field in the next visible row."""
@@ -641,6 +666,12 @@ class App:
                 w.grid_configure(row=r + 1, column=j)
             row[5].grid_configure(row=r + 1, column=5)
         self.recalc()
+
+    def focus_profit_entry(self):
+        if getattr(self, "profit_entry", None) is not None:
+            self.profit_entry.focus_set()
+            self.profit_entry.selection_range(0, tk.END)
+        return "break"
 
     def focus_weight_entry(self):
         if getattr(self, "weight_entry", None) is not None:
@@ -731,7 +762,7 @@ class App:
         for p, d, q, c, *_ in self.rows:
             if p.get().strip() and self.num(q.get()) > 0:
                 out.append((
-                    p.get().strip(),
+                    p.get().strip().upper(),
                     d.get().strip(),
                     self.num(q.get()),
                     self.num(c.get())
