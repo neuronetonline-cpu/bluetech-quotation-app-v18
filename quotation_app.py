@@ -285,9 +285,10 @@ class App:
         page_parent = self.page_content
 
         # ---------- Section helper ----------
-        def section(title, subtitle=""):
-            bar = tk.Frame(page_parent, bg="#0878D1", height=34)
-            bar.pack(fill="x", padx=12, pady=(8, 0))
+        def section(title, subtitle="", parent=None):
+            target = parent if parent is not None else page_parent
+            bar = tk.Frame(target, bg="#0878D1", height=34)
+            bar.pack(fill="x", padx=(0 if parent is not None else 12), pady=(8, 0))
             bar.pack_propagate(False)
             tk.Label(bar, text=title, bg="#0878D1", fg="white",
                      font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
@@ -333,15 +334,19 @@ class App:
                  font=("Segoe UI", 8, "bold")).grid(row=2, column=2, sticky="w", padx=7, pady=(3, 0))
         ttk.Entry(info, textvariable=self.title).grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
 
-        # ---------- Items section ----------
-        section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY")
-        box = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        # The product table grows automatically to show the standard 16 rows.
-        # Extra rows are kept inside the table scrollbar instead of making the
-        # whole quotation page unnecessarily tall.
-        box.pack(fill="x", padx=12)
-        self.product_box = box
+        # ---------- Quotation workspace ----------
+        workspace = tk.Frame(page_parent, bg="#F3F7FC")
+        workspace.pack(fill="x", padx=12)
+        workspace.columnconfigure(0, weight=7, minsize=760)
+        workspace.columnconfigure(1, weight=3, minsize=320)
 
+        # ---------- Items section ----------
+        left = tk.Frame(workspace, bg="#F3F7FC")
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY", parent=left)
+        box = tk.Frame(left, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        box.pack(fill="x")
+        self.product_box = box
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
         weights = [0, 3, 5, 1, 2, 0]
         for j, (h, wt) in enumerate(zip(heads, weights)):
@@ -349,13 +354,10 @@ class App:
             tk.Label(box, text=h, bg="#CFE6FA", fg="#12345B",
                      font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
                      padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
-
         body = tk.Frame(box, bg="#FFFFFF")
         body.grid(row=1, column=0, columnspan=6, sticky="ew")
         body.grid_propagate(False)
         self.table_body = body
-        box.rowconfigure(1, weight=0)
-
         self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
         self.table_scroll = ttk.Scrollbar(body, orient="vertical", command=self.table_canvas.yview)
         self.table = tk.Frame(self.table_canvas, bg="#FFFFFF")
@@ -363,7 +365,6 @@ class App:
         self.table_canvas.configure(yscrollcommand=self.table_scroll.set)
         self.table_canvas.pack(side="left", fill="both", expand=True)
         self.table_scroll.pack(side="right", fill="y")
-
         def on_table_configure(_event=None):
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
         def on_canvas_configure(event):
@@ -371,38 +372,35 @@ class App:
         self.table.bind("<Configure>", on_table_configure)
         self.table_canvas.bind("<Configure>", on_canvas_configure)
         self.table_canvas.bind_all("<MouseWheel>", self._table_mousewheel, add="+")
-
         self.rows = []
         for p in DEFAULT_PRODUCTS:
             self.add_row(p, silent=True)
         self.update_product_table_height()
-
-        addbar = tk.Frame(page_parent, bg="#F3F7FC")
-        addbar.pack(fill="x", padx=12, pady=(4, 2))
+        addbar = tk.Frame(left, bg="#F3F7FC")
+        addbar.pack(fill="x", pady=(4, 2))
         ttk.Button(addbar, text="＋  ADD PRODUCT / ROW", style="Blue.TButton",
                    command=lambda: self.add_row("")).pack(side="left")
-        tk.Label(addbar, text="Scroll inside the product list when adding more rows.",
+        tk.Label(addbar, text="Scroll the main quotation page when adding more rows.",
                  bg="#F3F7FC", fg="#667085", font=("Segoe UI", 8)).pack(side="left", padx=12)
 
         # ---------- Internal calculation ----------
+        right = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        right.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        section("INTERNAL CALCULATION", parent=right)
         self.total_cost = tk.StringVar(value="LKR 0.00")
         self.profit = tk.StringVar(value="0")
         self.final90 = tk.StringVar(value="LKR 0.00")
         self.final180 = tk.StringVar(value="LKR 0.00")
         self.weight = tk.StringVar(value="0")
         self.cod_charge = tk.StringVar(value="LKR 0.00")
-        self.cod_subtotal = tk.StringVar(value="LKR 0.00")
         self.cod_commission = tk.StringVar(value="LKR 0.00")
         self.pre_deposit_cod = tk.StringVar(value="LKR 0.00")
+        self.cod_subtotal = tk.StringVar(value="LKR 0.00")
         self.cod_final = tk.StringVar(value="LKR 0.00")
         self.cod_final_6m = tk.StringVar(value="LKR 0.00")
-
-        section("INTERNAL CALCULATION")
-        calc = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1, padx=7, pady=7)
-        calc.pack(fill="x", padx=12)
-
-        # Each calculation value is a normal editable Entry on the right side
-        # of a fixed-size row. Calculated fields are refreshed by CALCULATE.
+        calc = tk.Frame(right, bg="#FFFFFF", padx=7, pady=7)
+        calc.pack(fill="both", expand=True)
+        calc.columnconfigure(0, weight=1)
         labels = [
             ("3 Months Final Price", self.final90, True),
             ("6 Months Final Price (+35%)", self.final180, False),
@@ -417,26 +415,20 @@ class App:
             ("Final COD Price (6 month)", self.cod_final_6m, False),
         ]
         for i, (lab, var, is_final_3m) in enumerate(labels):
-            calc.columnconfigure(0, weight=1)
             card_bg = BLUE if is_final_3m else "#F7FAFE"
             card_border = BLUE if is_final_3m else "#D4E2F0"
-            card = tk.Frame(calc, bg=card_bg, highlightbackground=card_border, highlightthickness=1,
-                            padx=8, pady=4)
+            card = tk.Frame(calc, bg=card_bg, highlightbackground=card_border, highlightthickness=1, padx=8, pady=4)
             card.grid(row=i, column=0, sticky="ew", padx=1, pady=3)
             card.columnconfigure(1, weight=1)
             tk.Label(card, text=lab, bg=card_bg, fg=("white" if is_final_3m else "#12345B"),
                      font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(2, 8))
-            if is_final_3m:
-                ent = tk.Entry(card, textvariable=var, justify="right",
-                               font=("Segoe UI", 11, "bold"), bg=BLUE, fg="white",
-                               insertbackground="white", relief="flat", bd=0,
-                               highlightthickness=0)
-            else:
-                ent = ttk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"))
+            ent = (tk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 11, "bold"),
+                            bg=BLUE, fg="white", insertbackground="white", relief="flat", bd=0, highlightthickness=0)
+                   if is_final_3m else
+                   ttk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold")))
             ent.grid(row=0, column=1, sticky="ew", padx=(8, 0))
             if lab in ("Requested Profit", "Weight (KG)"):
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
-
         calc_btn = tk.Button(calc, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
@@ -504,43 +496,22 @@ class App:
             pass
 
     def update_product_table_height(self):
-        """Auto-size the quotation item area for the standard product list.
-
-        The normal 16-row product list is shown without an inner scrollbar on
-        a normal full-screen desktop window. If additional rows are added, or
-        the screen is smaller, the table is capped and its own scrollbar is
-        used.
-        """
+        """Show the standard 16 quotation rows without an inner scrollbar."""
         if not hasattr(self, "table_body") or not hasattr(self, "rows"):
             return
-
-        # One compact row is approximately 31px high with the current Entry
-        # padding/borders.  Keep all standard 16 products visible in a normal
-        # maximized desktop window.  The main page scrollbar can then handle
-        # the lower calculation/action area when necessary.
         row_height = 31
         desired_height = (len(self.rows) * row_height) + 6
-
         try:
             screen_height = self.root.winfo_screenheight()
         except Exception:
             screen_height = 900
-
-        # 16 standard rows need about 502px.  Allow that height even on a
-        # 768px-tall display; the outer quotation scrollbar will handle the
-        # rest of the page.  Extra rows are still limited and use the inner
-        # product scrollbar.
         max_height = max(502, min(560, screen_height - 250))
         table_height = min(desired_height, max_height)
-
         self.table_body.configure(height=table_height)
         self.table_body.update_idletasks()
         self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
-
-        # Hide the internal scrollbar when all rows fit; show it only when
-        # the table content is taller than the available table area.
-        content_bbox = self.table_canvas.bbox("all")
-        content_height = (content_bbox[3] - content_bbox[1]) if content_bbox else 0
+        bbox = self.table_canvas.bbox("all")
+        content_height = (bbox[3] - bbox[1]) if bbox else 0
         if content_height > table_height + 2:
             if not self.table_scroll.winfo_ismapped():
                 self.table_scroll.pack(side="right", fill="y")
