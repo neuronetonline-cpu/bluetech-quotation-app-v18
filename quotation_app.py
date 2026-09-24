@@ -31,8 +31,8 @@ os.makedirs(APP_DIR, exist_ok=True)
 DB = os.path.join(APP_DIR, "quotations.db")
 
 DEFAULT_PRODUCTS = [
-    "MOTHER BOARD", "PROCESSOR", "CPU FAN", "RAMS", "PSU", "CASING", "CASING FANS",
-    "SSD", "HDD", "VGA (used -03m)", "MONITOR (used-03m)", "ALL CABLES",
+    "MOTHER BOARD", "PROCESSOR", "CPU FAN", "RAMS", "POWER SUPPLY UNIT", "CASING", "CASING FANS",
+    "SSD", "HARD DISK DRIVE", "VGA (used -03m)", "MONITOR (used-03m)", "ALL CABLES",
     "MOUSE", "KEYBOARD", "SPEAKER", "WIFI ADAPTER"
 ]
 
@@ -121,6 +121,8 @@ def db():
         "cod_additional_kg": "100",
         "cod_commission": "2.5",
         "cod_min_amount": "20000",
+        "service_charger": "1500",
+        "show_predeposit_cod_quotation": "1",
     }
     for key, value in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
@@ -312,7 +314,7 @@ class App:
             users = ["Admin"]
         self.prepared_by = tk.StringVar(value=users[0])
         self.invoice_title = tk.StringVar()
-        self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_invoice", "1") == "1")
+        self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_quotation", "1") == "1")
 
         fields = [("Quotation No.", self.qno), ("Customer Name", self.customer),
                   ("WhatsApp / Phone", self.phone), ("Date", self.qdate)]
@@ -337,8 +339,8 @@ class App:
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
         self.prepared_combo.bind("<Return>", lambda event: self.focus_first_description())
 
-        # Invoice Title appears directly below Customer Name and is searchable in history.
-        tk.Label(info, text="INVOICE TITLE", bg="#FFFFFF", fg="#506176",
+        # Quotation Title appears directly below Customer Name and is searchable in history.
+        tk.Label(info, text="QUOTATION TITLE", bg="#FFFFFF", fg="#506176",
                  font=("Segoe UI", 8, "bold")).grid(row=2, column=2, sticky="w", padx=7, pady=(3, 0))
         self.invoice_title_entry = ttk.Entry(info, textvariable=self.invoice_title)
         self.invoice_title_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
@@ -405,6 +407,7 @@ class App:
         self.cod_subtotal_6m = tk.StringVar(value="LKR 0.00")
         self.cod_final_3m = tk.StringVar(value="LKR 0.00")
         self.cod_final_6m = tk.StringVar(value="LKR 0.00")
+        self.service_charger = tk.StringVar(value=get_setting("service_charger", "1500"))
 
         calc_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
         calc_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
@@ -424,6 +427,7 @@ class App:
             ("3 Months Final Price", self.final90, False, True),
             ("6 Months Final Price (+35%)", self.final180, False, False),
             ("Weight (KG)", self.weight, True, False),
+            ("Service Charger", self.service_charger, True, False),
             ("COD Charge", self.cod_charge, False, False),
             ("COD Commission", self.cod_commission, False, False),
             ("Pre Deposit COD Amount", self.pre_deposit_cod, False, False),
@@ -468,6 +472,11 @@ class App:
                 if lab == "Requested Profit":
                     self.profit_entry = ent
                     ent.bind("<Return>", lambda event: self.focus_weight_entry())
+                elif lab == "Service Charger":
+                    ent.bind("<KeyRelease>", lambda event: (
+                        set_setting("service_charger", self.service_charger.get()),
+                        self.recalc()
+                    ))
                 elif lab == "Weight (KG)":
                     self.weight_entry = ent
                     ent.bind("<Return>", lambda event: self.focus_profit_entry())
@@ -492,9 +501,9 @@ class App:
 
         self.predeposit_check = ttk.Checkbutton(
             calc_body,
-            text="Show Pre Deposit COD Amount on Invoice PDF",
+            text="Show Pre Deposit COD Amount on Quotation PDF",
             variable=self.show_predeposit_cod,
-            command=lambda: set_setting("show_predeposit_cod_invoice", "1" if self.show_predeposit_cod.get() else "0")
+            command=lambda: set_setting("show_predeposit_cod_quotation", "1" if self.show_predeposit_cod.get() else "0")
         )
         self.predeposit_check.grid(row=calc_row + 1, column=0, columnspan=2, sticky="w", pady=(5, 2))
 
@@ -643,6 +652,10 @@ class App:
     def _product_keyrelease(self, var, widget):
         value = var.get()
         upper = value.upper()
+        if upper in ("PSU", "POWER SUPPLY"):
+            upper = "POWER SUPPLY UNIT"
+        elif upper in ("HDD", "HARD DISK"):
+            upper = "HARD DISK DRIVE"
         if value != upper:
             var.set(upper)
             widget.icursor(tk.END)
@@ -752,12 +765,6 @@ class App:
             row[5].grid_configure(row=r + 1, column=5)
         self.recalc()
 
-    def focus_profit_entry(self):
-        if getattr(self, "profit_entry", None) is not None:
-            self.profit_entry.focus_set()
-            self.profit_entry.selection_range(0, tk.END)
-        return "break"
-
     def focus_weight_entry(self):
         if getattr(self, "weight_entry", None) is not None:
             self.weight_entry.focus_set()
@@ -795,8 +802,9 @@ class App:
             self.cod_final_3m.set("")
             self.cod_final_6m.set("")
             return
-        final90 = cost + profit
-        final180 = final90 * 1.35
+        service_charge = max(0, self.num(self.service_charger.get()))
+        final90 = cost + profit + service_charge
+        final180 = (cost + profit) * 1.35 + service_charge
 
         weight = self.num(self.weight.get())
         first_kg = self.num(get_setting("cod_first_kg", "450"))
@@ -846,9 +854,14 @@ class App:
         out = []
         for p, d, q, c, *_ in self.rows:
             if p.get().strip() and self.num(q.get()) > 0:
+                product = p.get().strip().upper()
+                if product == "PSU":
+                    product = "POWER SUPPLY UNIT"
+                elif product == "HDD":
+                    product = "HARD DISK DRIVE"
                 out.append((
-                    p.get().strip().upper(),
-                    d.get().strip(),
+                    product,
+                    d.get().strip().upper(),
                     self.num(q.get()),
                     self.num(c.get())
                 ))
@@ -1033,6 +1046,7 @@ class App:
             f"<b>Date</b> : {self.qdate.get()}<br/>"
             f"<b>Customer</b> : <font name='Helvetica-Bold'>{customer_name}</font><br/>"
             f"<b>Phone / WhatsApp</b> : {self.phone.get()}<br/>"
+            f"<b>Quotation Title</b> : {self.invoice_title.get() or '-'}<br/>"
             f"<font size='7.5'>Prepared By : {self.prepared_by.get()}</font>",
             info_style
         )
@@ -1051,6 +1065,13 @@ class App:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(qtitle)
+        if self.invoice_title.get().strip():
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(
+                f"<b>{self.invoice_title.get().strip()}</b>",
+                ParagraphStyle("quotation_title_text", parent=normal, fontSize=11,
+                               leading=13, textColor=colors.HexColor(BLUE))
+            ))
 
         story.append(Paragraph(
             "BUILD YOUR IDEAL PC WITH US",
@@ -1063,8 +1084,13 @@ class App:
 
         data = [["#", "PRODUCT", "PRODUCT DESCRIPTION", "QTY"]]
         for i, (p, d, q, c) in enumerate(items, start=1):
+            prod = p.strip().upper()
+            if prod == "PSU":
+                prod = "POWER SUPPLY UNIT"
+            elif prod == "HDD":
+                prod = "HARD DISK DRIVE"
             data.append([
-                str(i), p, d,
+                str(i), prod, d.strip().upper(),
                 str(int(q) if float(q).is_integer() else q)
             ])
 
@@ -1089,10 +1115,30 @@ class App:
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ("ALIGN", (0, 0), (0, -1), "CENTER"),
-            ("ALIGN", (2, 1), (2, -1), "CENTER"),
+            ("ALIGN", (2, 0), (2, -1), "CENTER"),
             ("ALIGN", (-1, 0), (-1, -1), "CENTER"),
         ]))
         story.append(t)
+        story.append(Spacer(1, 7))
+
+        service_amount = max(0, self.num(self.service_charger.get()))
+        service_table = Table(
+            [[Paragraph("<b>SERVICE CHARGER</b>", normal),
+              Paragraph(money(service_amount), ParagraphStyle(
+                  "service_price", parent=normal, fontName="Helvetica-Bold",
+                  alignment=TA_RIGHT, fontSize=9.5, leading=11))]],
+            colWidths=[145 * mm, 35 * mm]
+        )
+        service_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F6FAFF")),
+            ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#B8D8F5")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(service_table)
         story.append(Spacer(1, 7))
 
         p90 = self.num(self.final90.get())
@@ -1170,6 +1216,27 @@ class App:
         ]))
         story.append(warranty_row)
         story.append(Spacer(1, 7))
+
+        if self.show_predeposit_cod.get() and self.num(self.pre_deposit_cod.get()) > 0:
+            pre_table = Table(
+                [[Paragraph("<b>PRE DEPOSIT COD AMOUNT</b>", normal),
+                  Paragraph(money(self.num(self.pre_deposit_cod.get())),
+                            ParagraphStyle("predeposit_price", parent=normal,
+                                           fontName="Helvetica-Bold",
+                                           alignment=TA_RIGHT, fontSize=10, leading=12))]],
+                colWidths=[145 * mm, 35 * mm]
+            )
+            pre_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF8E8")),
+                ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#F0B429")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            story.append(pre_table)
+            story.append(Spacer(1, 7))
 
         terms = Paragraph(
             "<b>Terms & Conditions</b><br/>"
@@ -1654,7 +1721,7 @@ class App:
         search_entry.pack(side="left", fill="x", expand=True)
         ttk.Label(
             search_row,
-            text="Name / Invoice Title / Quotation No. / Phone / Date"
+            text="Name / Quotation Title / Quotation No. / Phone / Date"
         ).pack(side="left", padx=10)
 
         tree = ttk.Treeview(
@@ -1663,7 +1730,7 @@ class App:
             show="headings"
         )
         headings = (
-            "Quotation No.", "Customer", "Invoice Title", "Phone", "Date",
+            "Quotation No.", "Customer", "Quotation Title", "Phone", "Date",
             "Requested Profit", "3 Months", "6 Months"
         )
         widths = (145, 170, 170, 125, 100, 125, 125, 125)
