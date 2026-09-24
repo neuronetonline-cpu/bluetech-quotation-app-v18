@@ -402,44 +402,41 @@ class App:
         calc_body.columnconfigure(0, weight=1)
         calc_body.columnconfigure(1, weight=1)
 
-        labels = [
-            ("3 Months Final Price", self.final90, False, True),
-            ("6 Months Final Price (+35%)", self.final180, False, False),
-            ("Total Cost", self.total_cost, False, False),
-            ("Requested Profit", self.profit, True, False),
-            ("Weight (KG)", self.weight, True, False),
-            ("COD Charge", self.cod_charge, False, False),
-            ("COD Commission", self.cod_commission, False, False),
-            ("Pre Deposit COD Amount", self.pre_deposit_cod, False, False),
-            ("COD Subtotal (3 month)", self.cod_subtotal_3m, False, False),
-            ("COD Subtotal (6 month)", self.cod_subtotal_6m, False, False),
-            ("Final COD Price (3 month)", self.cod_final_3m, False, False),
-            ("Final COD Price (6 month)", self.cod_final_6m, False, False),
-        ]
+        # Calculation layout is intentionally split into separate visual sections:
+        # 1) Final prices
+        # 2) COD calculation block
+        # 3) Calculate button
+        # 4) Total Cost + Requested Profit
+        final_price_group = tk.Frame(calc_body, bg="#FFFFFF")
+        final_price_group.grid(row=0, column=0, columnspan=2, sticky="ew")
+        final_price_group.columnconfigure(0, weight=1)
+        final_price_group.columnconfigure(1, weight=1)
 
-        # First 3 calculation rows stay in the normal area.
-        # Requested Profit through CALCULATE are grouped into a separate highlighted block.
-        highlight_group = None
+        cod_group = tk.Frame(calc_body, bg="#EEF7FF", highlightbackground="#0878D1",
+                             highlightthickness=1, padx=5, pady=5)
+        cod_group.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        cod_group.columnconfigure(0, weight=1)
+        cod_group.columnconfigure(1, weight=1)
 
-        for i, (lab, var, editable, is_final_3m) in enumerate(labels):
-            if i == 3:
-                highlight_group = tk.Frame(
-                    calc_body, bg="#EEF7FF", highlightbackground="#0878D1",
-                    highlightthickness=2, padx=5, pady=5
-                )
-                highlight_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-                highlight_group.columnconfigure(0, weight=1)
-                highlight_group.columnconfigure(1, weight=1)
+        button_group = tk.Frame(calc_body, bg="#FFFFFF", highlightbackground="#D4E2F0",
+                                highlightthickness=1, padx=5, pady=5)
+        button_group.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        button_group.columnconfigure(0, weight=1)
+        button_group.columnconfigure(1, weight=1)
 
-            parent = highlight_group if i >= 3 else calc_body
-            row_index = i - 3 if i >= 3 else i
+        bottom_group = tk.Frame(calc_body, bg="#F7FAFE", highlightbackground="#0878D1",
+                                highlightthickness=1, padx=5, pady=5)
+        bottom_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        bottom_group.columnconfigure(0, weight=1)
+        bottom_group.columnconfigure(1, weight=1)
 
-            card_bg = BLUE if is_final_3m else ("#FFFFFF" if i >= 3 else "#F7FAFE")
+        def add_calc_card(parent, row, lab, var, editable=False, is_final_3m=False):
+            card_bg = BLUE if is_final_3m else "#FFFFFF"
             card_border = BLUE if is_final_3m else "#D4E2F0"
             card_pady = 9 if is_final_3m else 6
             card = tk.Frame(parent, bg=card_bg, highlightbackground=card_border,
                             highlightthickness=1, padx=8, pady=card_pady)
-            card.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=2)
+            card.grid(row=row, column=0, columnspan=2, sticky="ew", pady=2)
             card.columnconfigure(1, weight=1)
             tk.Label(card, text=lab, bg=card_bg,
                      fg=("white" if is_final_3m else "#17324D"),
@@ -466,12 +463,32 @@ class App:
                                relief="flat", bd=0, highlightthickness=0,
                                state="readonly", readonlybackground=card_bg)
                 ent.grid(row=0, column=1, sticky="ew")
+            return ent
 
-        calc_btn = tk.Button(highlight_group, text="CALCULATE", command=self.recalc,
+        # 1-2. Final prices
+        add_calc_card(final_price_group, 0, "3 Months Final Price", self.final90, is_final_3m=True)
+        add_calc_card(final_price_group, 1, "6 Months Final Price (+35%)", self.final180)
+
+        # 3-11. COD calculation section
+        add_calc_card(cod_group, 0, "Weight (KG)", self.weight, editable=True)
+        add_calc_card(cod_group, 1, "COD Charge", self.cod_charge)
+        add_calc_card(cod_group, 2, "COD Commission", self.cod_commission)
+        add_calc_card(cod_group, 3, "Pre Deposit COD Amount", self.pre_deposit_cod)
+        add_calc_card(cod_group, 4, "COD Subtotal (3 month)", self.cod_subtotal_3m)
+        add_calc_card(cod_group, 5, "COD Subtotal (6 month)", self.cod_subtotal_6m)
+        add_calc_card(cod_group, 6, "Final COD Price (3 month)", self.cod_final_3m)
+        add_calc_card(cod_group, 7, "Final COD Price (6 month)", self.cod_final_6m)
+
+        # 12-13. Separate Calculate section
+        calc_btn = tk.Button(button_group, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
                              relief="flat", padx=15, pady=10, cursor="hand2")
-        calc_btn.grid(row=len(labels) - 3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        calc_btn.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+        # 14-16. Total Cost + Requested Profit section at the bottom
+        add_calc_card(bottom_group, 0, "Total Cost", self.total_cost)
+        add_calc_card(bottom_group, 1, "Requested Profit", self.profit, editable=True)
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
