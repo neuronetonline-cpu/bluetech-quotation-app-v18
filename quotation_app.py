@@ -1386,10 +1386,21 @@ class App:
 
         quote_total = self.num(self.final90.get())
         cost_total = sum(self.num(q) * max(0.0, self.num(c)) for _, _, q, c in items)
+        service_amount = max(0.0, self.num(self.service_charger.get()))
+        # Allocate the quotation's hardware portion across the product rows.
+        # If the quotation final price is still zero, fall back to the internal
+        # hardware cost so the invoice total is never incorrectly shown as zero.
+        hardware_total = quote_total - service_amount
+        if hardware_total <= 0:
+            hardware_total = cost_total
+        if hardware_total <= 0:
+            hardware_total = max(0.0, quote_total)
+        if hardware_total <= 0:
+            hardware_total = 0.0
         if cost_total <= 0:
-            shares = [quote_total / len(items)] * len(items)
+            shares = [hardware_total / len(items)] * len(items)
         else:
-            shares = [(self.num(q) * max(0.0, self.num(c)) / cost_total) * quote_total for _, _, q, c in items]
+            shares = [(self.num(q) * max(0.0, self.num(c)) / cost_total) * hardware_total for _, _, q, c in items]
 
         win = tk.Toplevel(self.root)
         win.title("Bluetech Computers - Invoice")
@@ -1435,11 +1446,11 @@ class App:
         payment_combo = ttk.Combobox(controls, textvariable=payment_method, values=payment_methods, state="readonly", width=24)
         payment_combo.pack(side="left")
 
-        # Fixed action bar at the bottom so Print / Preview / Save PDF are always visible.
-        actions=ttk.Frame(win, padding=8)
+        # Fixed action bar at the bottom.
+        actions = ttk.Frame(win, padding=(8, 6))
         actions.pack(side="bottom", fill="x")
 
-        # Scrollable invoice body stays above the fixed action bar.
+        # Scrollable invoice body occupies only the space above the fixed action bar.
         outer = ttk.Frame(win)
         outer.pack(side="top", fill="both", expand=True, padx=6, pady=2)
         body_canvas = tk.Canvas(outer, highlightthickness=0)
@@ -1455,6 +1466,7 @@ class App:
         payment_box = ttk.LabelFrame(body, text="Payment Breakdown", padding=6)
         payment_box.pack(fill="x", padx=4, pady=4)
         payment_rows = []
+        total_var = tk.StringVar(value="LKR 0.00")
         invoice_total_payment_var = tk.StringVar(value="LKR 0.00")
         payment_total_var = tk.StringVar(value="LKR 0.00")
         def add_payment_row(method=None, amount="0"):
@@ -1503,6 +1515,7 @@ class App:
             sc_av.set(money(sc_amount))
             total_var.set(money(total))
             invoice_total_payment_var.set(money(total))
+            calc_payments()
 
         def rebuild_table():
             for w in box.winfo_children():
@@ -1546,7 +1559,7 @@ class App:
         sc_qv.trace_add("write",calc_invoice); sc_uv.trace_add("write",calc_invoice)
         rebuild_table()
 
-        ttk.Label(win,text="Dot-matrix friendly invoice: text and horizontal separators only.",foreground=GREY).pack(anchor="w",padx=12,pady=(0,4),before=actions)
+        ttk.Label(controls, text="Dot-matrix friendly", foreground=GREY).pack(side="right", padx=8)
 
         def invoice_data():
             rows=[]
@@ -1666,10 +1679,10 @@ class App:
             # Preview uses the same PDF output and opens it with the default PDF viewer.
             save_invoice_pdf()
 
+        ttk.Button(actions,text="CLOSE",command=win.destroy).pack(side="right",padx=5)
         ttk.Button(actions,text="SAVE INVOICE PDF",command=save_invoice_pdf).pack(side="right",padx=5)
         ttk.Button(actions,text="PREVIEW INVOICE",command=preview_invoice).pack(side="right",padx=5)
         ttk.Button(actions,text="PRINT INVOICE",command=print_invoice).pack(side="right",padx=5)
-        ttk.Button(actions,text="CLOSE",command=win.destroy).pack(side="right",padx=5)
 
     def whatsapp_quotation(self):
         if not self.customer.get().strip():
