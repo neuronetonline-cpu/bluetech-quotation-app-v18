@@ -197,7 +197,7 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
 
         doc = SimpleDocTemplate(
             path, pagesize=page,
-            leftMargin=0.5*72, rightMargin=8*mm,
+            leftMargin=0.75*72, rightMargin=8*mm,
             topMargin=5*mm, bottomMargin=5*mm
         )
 
