@@ -329,22 +329,20 @@ class App:
         # ---------- Items section ----------
         section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY")
         box = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        box.pack(fill="both", expand=True, padx=12)
+        box.pack(fill="x", padx=12)
 
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
-        weights = [0, 0, 0, 0, 0, 0]
-        # Keep DESCRIPTION at its current width, while reducing PRODUCT, QTY and COST.
-        # The unused space is intentionally left on the right side of the table.
-        column_widths = [42, 155, 360, 72, 130, 70]
+        # DESCRIPTION gets the largest share; PRODUCT is medium; QTY/COST/REMOVE stay compact.
+        weights = [0, 2, 6, 1, 2, 0]
         for j, (h, wt) in enumerate(zip(heads, weights)):
-            box.columnconfigure(j, weight=wt, minsize=column_widths[j])
+            box.columnconfigure(j, weight=wt, minsize=[40, 160, 350, 70, 120, 65][j])
             tk.Label(box, text=h, bg="#CFE6FA", fg="#12345B",
                      font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
                      padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
 
         body = tk.Frame(box, bg="#FFFFFF")
         body.grid(row=1, column=0, columnspan=6, sticky="nsew")
-        box.rowconfigure(1, weight=1, minsize=85)
+        box.rowconfigure(1, weight=0, minsize=255)
 
         self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
         self.table_scroll = ttk.Scrollbar(body, orient="vertical", command=self.table_canvas.yview)
@@ -352,7 +350,8 @@ class App:
         self.table_window = self.table_canvas.create_window((0, 0), window=self.table, anchor="nw")
         self.table_canvas.configure(yscrollcommand=self.table_scroll.set)
         self.table_canvas.pack(side="left", fill="both", expand=True)
-        self.table_scroll.pack(side="right", fill="y")
+        # Keep scrolling available by mouse wheel, but do not show an inner scrollbar.
+        self.table_scroll.pack_forget()
 
         def on_table_configure(_event=None):
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
@@ -423,20 +422,15 @@ class App:
         actions = tk.Frame(page_parent, bg="#F3F7FC")
         actions.pack(fill="x", padx=12, pady=(6, 10))
         ttk.Button(actions, text="CLEAR", style="Light.TButton", command=self.new_quote).pack(side="left", padx=3)
-
-        # Keep all quotation action buttons together in one straight horizontal row
-        # on the right side, starting from the Convert to Invoice position.
-        action_bar = tk.Frame(actions, bg="#F3F7FC")
-        action_bar.pack(side="right", anchor="e")
-        inv_btn = tk.Button(action_bar, text="CONVERT TO INVOICE", command=self.convert_to_invoice,
+        ttk.Button(actions, text="SAVE QUOTATION", style="Blue.TButton", command=self.save_quote).pack(side="right", padx=3)
+        ttk.Button(actions, text="CREATE JOB CHIT", style="Green.TButton", command=lambda: open_job_chit(self, db, get_pdf_dir)).pack(side="right", padx=3)
+        ttk.Button(actions, text="SAVE AS NEW QUOTATION", style="Blue.TButton", command=self.save_as_new_quote).pack(side="right", padx=3)
+        ttk.Button(actions, text="PREVIEW / SAVE PDF", style="Blue.TButton", command=self.save_pdf).pack(side="right", padx=3)
+        ttk.Button(actions, text="WHATSAPP QUOTATION", style="Green.TButton", command=self.whatsapp_quotation).pack(side="right", padx=3)
+        inv_btn = tk.Button(actions, text="CONVERT TO INVOICE", command=self.convert_to_invoice,
                             bg="#E53935", fg="white", activebackground="#C62828", activeforeground="white",
                             font=("Segoe UI", 9, "bold"), relief="flat", padx=16, pady=8, cursor="hand2")
-        inv_btn.pack(side="left", padx=3)
-        ttk.Button(action_bar, text="WHATSAPP QUOTATION", style="Green.TButton", command=self.whatsapp_quotation).pack(side="left", padx=3)
-        ttk.Button(action_bar, text="PREVIEW / SAVE PDF", style="Blue.TButton", command=self.save_pdf).pack(side="left", padx=3)
-        ttk.Button(action_bar, text="SAVE AS NEW QUOTATION", style="Blue.TButton", command=self.save_as_new_quote).pack(side="left", padx=3)
-        ttk.Button(action_bar, text="CREATE JOB CHIT", style="Green.TButton", command=lambda: open_job_chit(self, db, get_pdf_dir)).pack(side="left", padx=3)
-        ttk.Button(action_bar, text="SAVE QUOTATION", style="Blue.TButton", command=self.save_quote).pack(side="left", padx=3)
+        inv_btn.pack(side="right", padx=3)
 
         self.recalc()
 
@@ -521,8 +515,8 @@ class App:
                         relief="solid", bd=1, cursor="hand2")
         btn.grid(row=r, column=5, padx=2, pady=2, sticky="nsew")
         self.rows.append((p, d, q, c, widgets, btn, num_lbl))
-        for col in range(6):
-            self.table.columnconfigure(col, weight=(0 if col in (0, 5) else 1), minsize=40)
+        for col, wt in enumerate([0, 2, 6, 1, 2, 0]):
+            self.table.columnconfigure(col, weight=wt, minsize=[40, 160, 350, 70, 120, 65][col])
 
         if hasattr(self, "table_canvas"):
             self.table_canvas.update_idletasks()
