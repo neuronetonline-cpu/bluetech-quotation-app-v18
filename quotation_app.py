@@ -314,7 +314,7 @@ class App:
             users = ["Admin"]
         self.prepared_by = tk.StringVar(value=users[0])
         self.invoice_title = tk.StringVar()
-        self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_quotation", "1") == "1")
+        self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_quotation", "0") == "1")
 
         fields = [("Quotation No.", self.qno), ("Customer Name", self.customer),
                   ("WhatsApp / Phone", self.phone), ("Date", self.qdate)]
@@ -337,7 +337,7 @@ class App:
         self.prepared_combo = ttk.Combobox(info, textvariable=self.prepared_by,
                                            values=users, state="readonly")
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
-        self.prepared_combo.bind("<Return>", lambda event: self.focus_first_description())
+        self.prepared_combo.bind("<Return>", lambda event: self.focus_quotation_title())
 
         # Quotation Title appears directly below Customer Name and is searchable in history.
         tk.Label(info, text="QUOTATION TITLE", bg="#FFFFFF", fg="#506176",
@@ -471,15 +471,16 @@ class App:
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
                 if lab == "Requested Profit":
                     self.profit_entry = ent
-                    ent.bind("<Return>", lambda event: self.focus_weight_entry())
+                    ent.bind("<Return>", lambda event: self.focus_service_charger_entry())
                 elif lab == "Service Charger":
+                    self.service_charger_entry = ent
                     ent.bind("<KeyRelease>", lambda event: (
                         set_setting("service_charger", self.service_charger.get()),
                         self.recalc()
                     ))
+                    ent.bind("<Return>", lambda event: self.focus_weight_entry())
                 elif lab == "Weight (KG)":
                     self.weight_entry = ent
-                    ent.bind("<Return>", lambda event: self.focus_profit_entry())
             else:
                 ent = tk.Entry(card, textvariable=var, justify="right",
                                font=("Segoe UI", 14 if is_final_3m else 9, "bold"),
@@ -512,7 +513,11 @@ class App:
         sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
         sep.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=(6, 5))
         calc_row += 1
-        final_values = [("Total Cost", self.total_cost, False), ("Requested Profit", self.profit, True)]
+        final_values = [
+            ("Total Cost", self.total_cost, False),
+            ("Requested Profit", self.profit, True),
+            ("Service Charger", self.service_charger, True),
+        ]
         for j, (lab, var, editable) in enumerate(final_values):
             card = tk.Frame(calc_body, bg="#FFFFFF", highlightbackground="#D4E2F0",
                             highlightthickness=1, padx=8, pady=6)
@@ -689,6 +694,10 @@ class App:
         self.prepared_combo.focus_set()
         return "break"
 
+    def focus_quotation_title(self):
+        self.invoice_title_entry.focus_set()
+        return "break"
+
     def focus_first_description(self):
         if self.rows:
             self.rows[0][4][1].focus_set()
@@ -764,6 +773,12 @@ class App:
                 w.grid_configure(row=r + 1, column=j)
             row[5].grid_configure(row=r + 1, column=5)
         self.recalc()
+
+    def focus_service_charger_entry(self):
+        if hasattr(self, "service_charger_entry"):
+            self.service_charger_entry.focus_set()
+            self.service_charger_entry.select_range(0, "end")
+        return "break"
 
     def focus_weight_entry(self):
         if getattr(self, "weight_entry", None) is not None:
