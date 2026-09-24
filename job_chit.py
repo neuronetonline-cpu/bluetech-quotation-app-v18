@@ -8,9 +8,9 @@ from tkinter import ttk, messagebox
 from datetime import datetime
 from xml.sax.saxutils import escape
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether, KeepInFrame
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 CHECKS = ["Motherboard / CPU / cooler installed", "RAM / SSD / HDD installed", "PSU / GPU / cabling checked", "BIOS / boot verified", "Windows / drivers installed", "USB / audio / network tested", "Display / peripherals tested", "Temperature / stress test", "Final cleaning / accessories checked"]
@@ -97,18 +97,18 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
     ttk.Combobox(info, textvariable=status_var, values=STATUSES, state='readonly', width=22).grid(row=6,column=1,sticky='w',padx=5,pady=5)
 
     parts = ttk.LabelFrame(body, text='BUILD COMPONENTS (FROM QUOTATION)', padding=10); parts.pack(fill='x', pady=7)
-    for col, title in enumerate(['PRODUCT', 'DESCRIPTION (EDITABLE)', 'QTY']):
-        ttk.Label(parts, text=title, font=('Segoe UI',9,'bold')).grid(row=0,column=col,sticky='ew',padx=5,pady=(0,4))
-    desc_vars = []
+    for col, title in enumerate(['PRODUCT', 'DESCRIPTION', 'QTY']):
+        ttk.Label(parts, text=title, font=('Segoe UI',9,'bold')).grid(row=0,column=col,sticky='w',padx=5)
+
+    # Product descriptions are editable here before the Job Chit is saved/printed.
+    description_vars = []
     for i, (p,d,q) in enumerate(items, 1):
-        ttk.Label(parts, text=str(p), font=('Segoe UI',9,'bold')).grid(row=i,column=0,sticky='w',padx=5,pady=2)
-        dv = tk.StringVar(value=str(d or ''))
-        desc_vars.append(dv)
-        ttk.Entry(parts, textvariable=dv).grid(row=i,column=1,sticky='ew',padx=5,pady=2)
-        ttk.Label(parts, text=str(q), anchor='center').grid(row=i,column=2,sticky='ew',padx=5,pady=2)
+        ttk.Label(parts, text=str(p), font=('Segoe UI',9,'bold')).grid(row=i,column=0,sticky='w',padx=5,pady=3)
+        desc_var = tk.StringVar(value=str(d or ''))
+        description_vars.append(desc_var)
+        ttk.Entry(parts, textvariable=desc_var, width=65).grid(row=i,column=1,sticky='ew',padx=5,pady=2)
+        ttk.Label(parts, text=str(q)).grid(row=i,column=2,sticky='w',padx=5)
     parts.columnconfigure(1, weight=1)
-    parts.columnconfigure(0, weight=1, minsize=180)
-    parts.columnconfigure(2, weight=0, minsize=55)
 
     people = ttk.LabelFrame(body, text='STAFF / RESPONSIBILITY', padding=10); people.pack(fill='x', pady=7)
     names = [n for _,n in app_get_users(db)]
@@ -133,11 +133,12 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
     notes_frame = ttk.LabelFrame(body, text='WORKSHOP REMARKS / SERIAL NUMBERS', padding=10); notes_frame.pack(fill='x', pady=7)
     remarks = tk.Text(notes_frame, height=5, wrap='word'); remarks.insert('1.0',notes or ''); remarks.pack(fill='x')
 
-    def current_items():
-        return [[items[i][0], desc_vars[i].get().strip(), items[i][2]] for i in range(len(items))]
-
     def payload():
-        return (due_var.get().strip(), status_var.get(), json.dumps(current_items(),ensure_ascii=False),
+        # Read the edited descriptions from the Job Chit window before saving.
+        for idx, desc_var in enumerate(description_vars):
+            if idx < len(items):
+                items[idx][1] = desc_var.get().strip()
+        return (due_var.get().strip(), status_var.get(), json.dumps(items,ensure_ascii=False),
                 json.dumps({k:v.get() for k,v in check_vars.items()}),
                 json.dumps({k:v.get().strip() for k,v in staff_vars.items()}),
                 json.dumps({k:v.get() for k,v in time_vars.items()}), remarks.get('1.0','end-1c').strip())
@@ -164,125 +165,81 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
         return True
 
     def make_pdf():
-        if not save(silent=True):
-            return None
-        folder = os.path.join(get_pdf_dir(), 'Job Chits')
-        os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, number + '.pdf')
-
-        # Simple black-and-white A4 landscape workshop form.
-        # Keep the page filled with useful data; avoid decorative graphics.
-        page = landscape(A4)
+        if not save(silent=True): return None
+        folder = os.path.join(get_pdf_dir(), 'Job Chits'); os.makedirs(folder,exist_ok=True)
+        path = os.path.join(folder,number+'.pdf')
         styles = getSampleStyleSheet()
-        body = ParagraphStyle(
-            'job_bw_body', parent=styles['Normal'], fontName='Helvetica',
-            fontSize=8.2, leading=9.5, textColor=colors.black
-        )
-        body_b = ParagraphStyle(
-            'job_bw_body_b', parent=body, fontName='Helvetica-Bold'
-        )
-        section = ParagraphStyle(
-            'job_bw_section', parent=body_b, fontSize=9, leading=10,
-            spaceBefore=3, spaceAfter=3, textColor=colors.black
-        )
-        title_style = ParagraphStyle(
-            'job_bw_title', parent=styles['Title'], fontName='Helvetica-Bold',
-            fontSize=15, leading=16, alignment=1, textColor=colors.black,
-            spaceAfter=2
-        )
-        subtitle = ParagraphStyle(
-            'job_bw_sub', parent=body, fontSize=7.5, leading=8.5,
-            alignment=1, textColor=colors.black
-        )
+        small = ParagraphStyle('jobsmall', parent=styles['Normal'], fontSize=7.2, leading=8.7, spaceAfter=0)
+        tiny = ParagraphStyle('jobtiny', parent=small, fontSize=6.8, leading=8.0)
+        title = ParagraphStyle('jobtitle',parent=styles['Title'],fontSize=15,leading=17,textColor=colors.HexColor('#075EAA'),spaceAfter=0)
+        section = ParagraphStyle('jobsection',parent=small,fontSize=7.4,leading=9,fontName='Helvetica-Bold',textColor=colors.HexColor('#075EAA'),spaceAfter=2)
 
         doc = SimpleDocTemplate(
-            path, pagesize=page,
-            leftMargin=8*mm, rightMargin=8*mm,
-            topMargin=7*mm, bottomMargin=7*mm
+            path, pagesize=A4,
+            leftMargin=9*mm, rightMargin=9*mm, topMargin=7*mm, bottomMargin=7*mm
         )
 
-        def P(text, bold=False, size=None):
-            st = body_b if bold else body
-            if size:
-                st = ParagraphStyle(
-                    'tmp_%s_%s' % (id(text), size), parent=st,
-                    fontSize=size, leading=size+1.2
-                )
-            return Paragraph(escape(str(text or '-')).replace('\n', '<br/>'), st)
+        def para(s, style=small):
+            return Paragraph(escape(str(s or '-')).replace('\n','<br/>'), style)
 
-        def bw_table(data, widths, header=False, padd=2.5):
-            t = Table(data, colWidths=widths, repeatRows=1 if header else 0,
-                      hAlign='LEFT')
-            cmds = [
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('GRID', (0,0), (-1,-1), 0.45, colors.black),
-                ('LEFTPADDING', (0,0), (-1,-1), padd),
-                ('RIGHTPADDING', (0,0), (-1,-1), padd),
-                ('TOPPADDING', (0,0), (-1,-1), padd),
-                ('BOTTOMPADDING', (0,0), (-1,-1), padd),
+        def table(data, widths, header=False, font_size=7.2, pad=2.5):
+            t = Table(data, colWidths=widths, hAlign='LEFT', repeatRows=1 if header else 0)
+            commands = [
+                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                ('GRID',(0,0),(-1,-1),.35,colors.HexColor('#B8C7D9')),
+                ('LEFTPADDING',(0,0),(-1,-1),pad),
+                ('RIGHTPADDING',(0,0),(-1,-1),pad),
+                ('TOPPADDING',(0,0),(-1,-1),pad),
+                ('BOTTOMPADDING',(0,0),(-1,-1),pad),
             ]
             if header:
-                cmds += [('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')]
-            t.setStyle(TableStyle(cmds))
-            return t
+                commands += [('BACKGROUND',(0,0),(-1,0),colors.HexColor('#DCEEFF'))]
+            t.setStyle(TableStyle(commands)); return t
 
         story = [
-            Paragraph('BLUETECH COMPUTERS', title_style),
-            Paragraph('PC BUILD JOB CHIT | INTERNAL WORKSHOP COPY', subtitle),
+            Paragraph('BLUETECH COMPUTERS', title),
+            Paragraph('PC BUILD JOB CHIT  |  INTERNAL WORKSHOP COPY', tiny),
+            Spacer(1,3),
         ]
 
-        # Job/customer details: compact, full-width black-and-white table.
-        info = [
-            [P('JOB NO', True), P(number), P('QUOTATION NO', True), P(qno),
-             P('STATUS', True), P(status_var.get())],
-            [P('CUSTOMER', True), P(customer), P('PHONE', True), P(phone),
-             P('CREATED', True), P(created)],
-            [P('DUE DATE', True), P(due_var.get() or '-'), P('PREPARED BY', True),
-             P(staff_vars['Prepared By'].get() or '-'), P(''), P('')],
+        info_data = [
+            [para('<b>JOB NO:</b> '+number), para('<b>QUOTATION:</b> '+str(qno)), para('<b>STATUS:</b> '+status_var.get())],
+            [para('<b>CUSTOMER:</b> '+str(customer)), para('<b>PHONE:</b> '+str(phone)), para('<b>CREATED:</b> '+str(created))],
+            [para('<b>DUE:</b> '+str(due_var.get() or '-')), para('<b>PREPARED BY:</b> '+str(staff_vars.get('Prepared By',tk.StringVar()).get())), para('')],
         ]
-        story += [bw_table(info, [22*mm, 62*mm, 28*mm, 55*mm, 22*mm, 73*mm], False),
-                  Paragraph('BUILD COMPONENTS', section)]
+        story += [table(info_data,[64*mm,64*mm,54*mm]), Spacer(1,3), Paragraph('BUILD COMPONENTS',section)]
 
-        pdata = [[P('#', True), P('PRODUCT', True), P('DESCRIPTION', True), P('QTY', True)]]
-        for i, (prod, desc, qty) in enumerate(current_items(), 1):
-            pdata.append([P(f'{i:02d}'), P(prod), P(desc or '-'), P(qty)])
-        story.append(bw_table(pdata, [10*mm, 58*mm, 168*mm, 22*mm], True, padd=2.1))
+        pdata = [[para('<b>PRODUCT</b>'), para('<b>DESCRIPTION</b>'), para('<b>QTY</b>')]]
+        for p,d,q in items:
+            pdata.append([para(p), para(d or '-'), para(q)])
+        story += [table(pdata,[48*mm,115*mm,19*mm],header=True,pad=2), Spacer(1,3), Paragraph('STAFF / RESPONSIBILITY',section)]
 
-        story.append(Paragraph('STAFF / RESPONSIBILITY', section))
-        sdata = [[P('STAGE', True), P('STAFF', True), P('DATE / TIME', True), P('MANUAL CHECK', True)]]
+        sdata = [[para('<b>STAGE</b>'),para('<b>STAFF</b>'),para('<b>DATE / TIME</b>')]]
         for stage in STAGES:
-            # Small empty square is intentionally printed for manual marking.
-            sdata.append([P(stage), P(staff_vars[stage].get() or '-'),
-                          P(time_vars[stage].get() or '-'), P('□')])
-        story.append(bw_table(sdata, [65*mm, 75*mm, 70*mm, 48*mm], True, padd=2.5))
+            sdata.append([para(stage),para(staff_vars[stage].get()),para(time_vars[stage].get())])
+        story += [table(sdata,[58*mm,62*mm,62*mm],header=True,pad=2), Spacer(1,3), Paragraph('BUILD / FINAL CHECKLIST',section)]
 
-        story.append(Paragraph('BUILD / FINAL CHECKLIST', section))
-        # Three columns with a small empty square for manual ticking.
+        # Compact 3-column checklist keeps the whole Job Chit on one A4 page.
         cdata = []
-        for i in range(0, len(CHECKS), 3):
+        for start_idx in range(0, len(CHECKS), 3):
             row = []
-            for item in CHECKS[i:i+3]:
-                row.append(P('□  ' + item))
+            for item in CHECKS[start_idx:start_idx+3]:
+                mark = '✓' if check_vars[item].get() else '☐'
+                row.append(para(mark+' '+item, tiny))
             while len(row) < 3:
-                row.append(P(''))
+                row.append(para('', tiny))
             cdata.append(row)
-        story.append(bw_table(cdata, [86*mm, 86*mm, 86*mm], False, padd=3.0))
+        story += [table(cdata,[60*mm,60*mm,62*mm],pad=2), Spacer(1,3), Paragraph('REMARKS / SERIAL NUMBERS',section),
+                  table([[para(remarks.get('1.0','end-1c') or '-')],[para('Workshop signature: ____________________    Final approval: ____________________',tiny)]],[182*mm],pad=2)]
 
-        story.append(Paragraph('WORKSHOP REMARKS / SERIAL NUMBERS', section))
-        remarks_text = remarks.get('1.0', 'end-1c').strip() or ' '
-        # Give the remarks area a useful printable writing space.
-        story.append(bw_table([[P(remarks_text)]], [258*mm], False, padd=4))
-        story.append(Spacer(1, 4))
-        story.append(bw_table([
-            [P('WORKSHOP SIGNATURE', True), P(''), P('FINAL APPROVAL', True), P('')],
-            [P('MANUAL NOTES / ADDITIONAL CHECK', True), P(''), P('DATE', True), P('')]
-        ], [38*mm, 93*mm, 32*mm, 95*mm], False, padd=4))
-
+        # Shrink the compact layout only if unusually long descriptions/remarks would
+        # otherwise push the document onto a second page.
+        available_h = A4[1] - (16*mm)
+        story = [KeepInFrame(A4[0] - 18*mm, available_h, story, mode='shrink')]
         try:
             doc.build(story)
         except Exception as e:
-            messagebox.showerror('PDF', str(e), parent=win)
-            return None
+            messagebox.showerror('PDF',str(e),parent=win); return None
         return path
 
     def pdf_click():
@@ -300,8 +257,25 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
         if not sys.platform.startswith('win'):
             messagebox.showinfo('Print',f'Open the PDF and print it:\n{path}',parent=win); return
         if messagebox.askyesno('Print Job Chit','Send the job chit to your DEFAULT Windows printer?',parent=win):
-            try: os.startfile(path,'print')
-            except OSError as e: messagebox.showerror('Printer',f'Printing failed: {e}\nPDF saved at {path}',parent=win)
+            try:
+                os.startfile(path, 'print')
+            except OSError as e:
+                # Some Windows PDF viewers do not register a 'print' shell verb
+                # (WinError 1155). Open the generated PDF instead so the user
+                # can print it normally with Ctrl+P / the PDF viewer's Print button.
+                if getattr(e, 'winerror', None) == 1155 or getattr(e, 'errno', None) == 1155:
+                    try:
+                        os.startfile(path, 'open')
+                        messagebox.showinfo(
+                            'Print',
+                            'Windows does not have a direct PDF print action configured.\n\n'
+                            'The Job Chit PDF has been opened. Use Ctrl+P or the Print button in the PDF viewer.',
+                            parent=win
+                        )
+                    except OSError:
+                        messagebox.showerror('Printer', f'Printing failed.\nPDF saved at {path}', parent=win)
+                else:
+                    messagebox.showerror('Printer', f'Printing failed: {e}\nPDF saved at {path}', parent=win)
     actions = ttk.Frame(win,padding=12); actions.pack(fill='x')
     ttk.Button(actions,text='SAVE JOB CHIT',command=save).pack(side='left',padx=4)
     ttk.Button(actions,text='SAVE / PREVIEW PDF',command=pdf_click).pack(side='left',padx=4)
