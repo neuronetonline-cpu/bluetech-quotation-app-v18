@@ -518,7 +518,7 @@ class App:
 
         num_lbl = tk.Label(self.table, text=str(r + 1), bg=row_bg, fg="#667085",
                            font=("Segoe UI", 8), width=4)
-        num_lbl.grid(row=r, column=0, padx=2, pady=2, sticky="nsew")
+        num_lbl.grid(row=r + 1, column=0, padx=2, pady=2, sticky="nsew")
 
         for j, var in enumerate([p, d, q, c], start=1):
             justify = "center" if j == 2 else ("right" if j == 4 else "left")
@@ -529,7 +529,7 @@ class App:
                          insertbackground="#075EAA", relief="solid", bd=1,
                          highlightthickness=1, highlightbackground="#C8D6E5",
                          highlightcolor="#0878D1")
-            e.grid(row=r, column=j, padx=2, pady=2, sticky="ew", ipady=3)
+            e.grid(row=r + 1, column=j, padx=2, pady=2, sticky="ew", ipady=3)
             widgets.append(e)
             e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
@@ -542,7 +542,7 @@ class App:
                         bg="#FFF4F4", fg="#D92D20", activebackground="#FEE4E2",
                         activeforeground="#B42318", font=("Segoe UI", 9, "bold"),
                         relief="solid", bd=1, cursor="hand2")
-        btn.grid(row=r, column=5, padx=2, pady=2, sticky="nsew")
+        btn.grid(row=r + 1, column=5, padx=2, pady=2, sticky="nsew")
         self.rows.append((p, d, q, c, widgets, btn, num_lbl))
         # Keep the hand-drawn layout proportions: narrow # / Qty / Cost / Remove,
         # medium Product, and the widest Description column.
@@ -582,11 +582,11 @@ class App:
         for r, row in enumerate(self.rows):
             row_bg = ROW_BLUE if r % 2 == 0 else ROW_WHITE
             row[6].configure(text=str(r + 1), bg=row_bg)
-            row[6].grid_configure(row=r, column=0)
+            row[6].grid_configure(row=r + 1, column=0)
             for j, w in enumerate(row[4], start=1):
                 w.configure(bg=row_bg)
-                w.grid_configure(row=r, column=j)
-            row[5].grid_configure(row=r, column=5)
+                w.grid_configure(row=r + 1, column=j)
+            row[5].grid_configure(row=r + 1, column=5)
         self.recalc()
 
     def num(self, x):
