@@ -379,7 +379,7 @@ class App:
         self.profit = tk.StringVar(value="0")
         self.final90 = tk.StringVar(value="LKR 0.00")
         self.final180 = tk.StringVar(value="LKR 0.00")
-        self.weight = tk.StringVar(value="0")
+        self.weight = tk.StringVar(value="")
         self.cod_charge = tk.StringVar(value="LKR 0.00")
         self.cod_commission = tk.StringVar(value="LKR 0.00")
         self.pre_deposit_cod = tk.StringVar(value="LKR 0.00")
@@ -420,8 +420,9 @@ class App:
         for i, (lab, var, editable, is_final_3m) in enumerate(labels):
             card_bg = BLUE if is_final_3m else "#F7FAFE"
             card_border = BLUE if is_final_3m else "#D4E2F0"
+            card_pady = 9 if is_final_3m else 6
             card = tk.Frame(calc_body, bg=card_bg, highlightbackground=card_border,
-                            highlightthickness=1, padx=8, pady=6)
+                            highlightthickness=1, padx=8, pady=card_pady)
             card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=2)
             card.columnconfigure(1, weight=1)
             tk.Label(card, text=lab, bg=card_bg,
@@ -437,9 +438,14 @@ class App:
                                highlightcolor="#0878D1")
                 ent.grid(row=0, column=1, sticky="ew")
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
+                if lab == "Requested Profit":
+                    self.profit_entry = ent
+                    ent.bind("<Return>", lambda event: self.focus_weight_entry())
+                elif lab == "Weight (KG)":
+                    self.weight_entry = ent
             else:
                 ent = tk.Entry(card, textvariable=var, justify="right",
-                               font=("Segoe UI", 12 if is_final_3m else 9, "bold"),
+                               font=("Segoe UI", 14 if is_final_3m else 9, "bold"),
                                bg=card_bg, fg=("white" if is_final_3m else "#17324D"),
                                relief="flat", bd=0, highlightthickness=0,
                                state="readonly", readonlybackground=card_bg)
@@ -533,8 +539,13 @@ class App:
             widgets.append(e)
             e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
+                # DESCRIPTION -> same field in the next row
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 1))
+            elif j == 3:
+                # QTY -> same field in the next row
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 2))
             elif j == 4:
+                # COST -> same field in the next row
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 3))
 
         btn = tk.Button(self.table, text="✕", width=4,
@@ -589,6 +600,12 @@ class App:
             row[5].grid_configure(row=r + 1, column=5)
         self.recalc()
 
+    def focus_weight_entry(self):
+        if getattr(self, "weight_entry", None) is not None:
+            self.weight_entry.focus_set()
+            self.weight_entry.selection_range(0, tk.END)
+        return "break"
+
     def num(self, x):
         try:
             return float(str(x).replace(",", "").replace("LKR", "").strip() or 0)
@@ -610,8 +627,21 @@ class App:
         additional_kg = self.num(get_setting("cod_additional_kg", "100"))
         commission_pct = self.num(get_setting("cod_commission", "2.5"))
         commission_min = self.num(get_setting("cod_min_amount", "20000"))
+        # Always refresh the non-COD calculations.
+        # COD values stay blank until a valid weight is entered.
+        self.total_cost.set(money(cost))
+        self.final90.set(money(final90))
+        self.final180.set(money(final180))
+
         if weight <= 0:
-            cod_charge = 0
+            self.cod_charge.set("")
+            self.cod_commission.set("")
+            self.pre_deposit_cod.set("")
+            self.cod_subtotal_3m.set("")
+            self.cod_subtotal_6m.set("")
+            self.cod_final_3m.set("")
+            self.cod_final_6m.set("")
+            return
         else:
             import math
             extra_kg = max(0, math.ceil(weight - 1))
@@ -628,9 +658,6 @@ class App:
         cod_final_3m = cod_subtotal_3m
         cod_final_6m = cod_subtotal_6m
 
-        self.total_cost.set(money(cost))
-        self.final90.set(money(final90))
-        self.final180.set(money(final180))
         self.cod_charge.set(money(cod_charge))
         self.cod_commission.set(money(cod_commission))
         self.pre_deposit_cod.set(money(pre_deposit))
@@ -1496,7 +1523,7 @@ class App:
         self.phone.set(q[3])
         self.qdate.set(q[4])
         self.profit.set(str(q[5] or 0))
-        self.weight.set(str(q[8] or 0))
+        self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
         self.refresh_prepared_users()
 
@@ -1533,7 +1560,7 @@ class App:
         self.phone.set(q[3] or "")
         self.qdate.set(datetime.now().strftime("%Y-%m-%d"))
         self.profit.set(str(q[5] or 0))
-        self.weight.set(str(q[8] or 0))
+        self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
         self.refresh_prepared_users()
 
@@ -1568,7 +1595,7 @@ class App:
         self.phone.set(q[3])
         self.qdate.set(q[4])
         self.profit.set(str(q[5] or 0))
-        self.weight.set(str(q[8] or 0))
+        self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
         self.refresh_prepared_users()
 
@@ -1604,7 +1631,7 @@ class App:
         self.phone.set(q[3])
         self.qdate.set(q[4])
         self.profit.set(str(q[5] or 0))
-        self.weight.set(str(q[8] or 0))
+        self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
         self.refresh_prepared_users()
 
