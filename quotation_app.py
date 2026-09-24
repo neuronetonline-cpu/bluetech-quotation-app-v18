@@ -417,13 +417,29 @@ class App:
             ("Final COD Price (6 month)", self.cod_final_6m, False, False),
         ]
 
+        # First 3 calculation rows stay in the normal area.
+        # Requested Profit through CALCULATE are grouped into a separate highlighted block.
+        highlight_group = None
+
         for i, (lab, var, editable, is_final_3m) in enumerate(labels):
-            card_bg = BLUE if is_final_3m else "#F7FAFE"
+            if i == 3:
+                highlight_group = tk.Frame(
+                    calc_body, bg="#EEF7FF", highlightbackground="#0878D1",
+                    highlightthickness=2, padx=5, pady=5
+                )
+                highlight_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+                highlight_group.columnconfigure(0, weight=1)
+                highlight_group.columnconfigure(1, weight=1)
+
+            parent = highlight_group if i >= 3 else calc_body
+            row_index = i - 3 if i >= 3 else i
+
+            card_bg = BLUE if is_final_3m else ("#FFFFFF" if i >= 3 else "#F7FAFE")
             card_border = BLUE if is_final_3m else "#D4E2F0"
             card_pady = 9 if is_final_3m else 6
-            card = tk.Frame(calc_body, bg=card_bg, highlightbackground=card_border,
+            card = tk.Frame(parent, bg=card_bg, highlightbackground=card_border,
                             highlightthickness=1, padx=8, pady=card_pady)
-            card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=2)
+            card.grid(row=row_index, column=0, columnspan=2, sticky="ew", pady=2)
             card.columnconfigure(1, weight=1)
             tk.Label(card, text=lab, bg=card_bg,
                      fg=("white" if is_final_3m else "#17324D"),
@@ -451,11 +467,11 @@ class App:
                                state="readonly", readonlybackground=card_bg)
                 ent.grid(row=0, column=1, sticky="ew")
 
-        calc_btn = tk.Button(calc_body, text="CALCULATE", command=self.recalc,
+        calc_btn = tk.Button(highlight_group, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
                              relief="flat", padx=15, pady=10, cursor="hand2")
-        calc_btn.grid(row=len(labels), column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        calc_btn.grid(row=len(labels) - 3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
