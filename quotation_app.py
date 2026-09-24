@@ -402,40 +402,36 @@ class App:
         calc_body.columnconfigure(0, weight=1)
         calc_body.columnconfigure(1, weight=1)
 
-        # Calculation layout is intentionally split into separate visual sections:
-        # 1) Final prices
-        # 2) COD calculation block
-        # 3) Calculate button
-        # 4) Total Cost + Requested Profit
-        final_price_group = tk.Frame(calc_body, bg="#FFFFFF")
-        final_price_group.grid(row=0, column=0, columnspan=2, sticky="ew")
-        final_price_group.columnconfigure(0, weight=1)
-        final_price_group.columnconfigure(1, weight=1)
+        labels = [
+            ("3 Months Final Price", self.final90, False, True),
+            ("6 Months Final Price (+35%)", self.final180, False, False),
+            ("Weight (KG)", self.weight, True, False),
+            ("COD Charge", self.cod_charge, False, False),
+            ("COD Commission", self.cod_commission, False, False),
+            ("Pre Deposit COD Amount", self.pre_deposit_cod, False, False),
+            ("COD Subtotal (3 month)", self.cod_subtotal_3m, False, False),
+            ("COD Subtotal (6 month)", self.cod_subtotal_6m, False, False),
+            ("Final COD Price (3 month)", self.cod_final_3m, False, False),
+            ("Final COD Price (6 month)", self.cod_final_6m, False, False),
+        ]
 
-        cod_group = tk.Frame(calc_body, bg="#EEF7FF", highlightbackground="#0878D1",
-                             highlightthickness=1, padx=5, pady=5)
-        cod_group.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        cod_group.columnconfigure(0, weight=1)
-        cod_group.columnconfigure(1, weight=1)
+        # Build the calculation panel in the requested groups.
+        section_positions = {2, 12, 14}
+        for i, (lab, var, editable, is_final_3m) in enumerate(labels):
+            if i == 2:
+                sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
+                sep.grid(row=i, column=0, columnspan=2, sticky="ew", pady=(5, 5))
+                row_offset = 1
+            else:
+                row_offset = 0
 
-        button_group = tk.Frame(calc_body, bg="#FFFFFF", highlightbackground="#D4E2F0",
-                                highlightthickness=1, padx=5, pady=5)
-        button_group.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        button_group.columnconfigure(0, weight=1)
-        button_group.columnconfigure(1, weight=1)
-
-        bottom_group = tk.Frame(calc_body, bg="#F7FAFE", highlightbackground="#0878D1",
-                                highlightthickness=1, padx=5, pady=5)
-        bottom_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        bottom_group.columnconfigure(0, weight=1)
-        bottom_group.columnconfigure(1, weight=1)
-
-        def add_calc_card(parent, row, lab, var, editable=False, is_final_3m=False):
-            card_bg = BLUE if is_final_3m else "#FFFFFF"
-            card_border = BLUE if is_final_3m else "#D4E2F0"
-            card_pady = 9 if is_final_3m else 6
-            card = tk.Frame(parent, bg=card_bg, highlightbackground=card_border,
-                            highlightthickness=1, padx=8, pady=card_pady)
+            row = i + (1 if i >= 2 else 0)
+            card_bg = BLUE if is_final_3m else ("#FFF8E8" if lab == "Pre Deposit COD Amount" else "#FFFFFF")
+            card_border = BLUE if is_final_3m else ("#F0B429" if lab == "Pre Deposit COD Amount" else "#D4E2F0")
+            card_pady = 9 if is_final_3m else (7 if lab == "Pre Deposit COD Amount" else 6)
+            card = tk.Frame(calc_body, bg=card_bg, highlightbackground=card_border,
+                            highlightthickness=2 if lab == "Pre Deposit COD Amount" else 1,
+                            padx=8, pady=card_pady)
             card.grid(row=row, column=0, columnspan=2, sticky="ew", pady=2)
             card.columnconfigure(1, weight=1)
             tk.Label(card, text=lab, bg=card_bg,
@@ -463,32 +459,45 @@ class App:
                                relief="flat", bd=0, highlightthickness=0,
                                state="readonly", readonlybackground=card_bg)
                 ent.grid(row=0, column=1, sticky="ew")
-            return ent
 
-        # 1-2. Final prices
-        add_calc_card(final_price_group, 0, "3 Months Final Price", self.final90, is_final_3m=True)
-        add_calc_card(final_price_group, 1, "6 Months Final Price (+35%)", self.final180)
-
-        # 3-11. COD calculation section
-        add_calc_card(cod_group, 0, "Weight (KG)", self.weight, editable=True)
-        add_calc_card(cod_group, 1, "COD Charge", self.cod_charge)
-        add_calc_card(cod_group, 2, "COD Commission", self.cod_commission)
-        add_calc_card(cod_group, 3, "Pre Deposit COD Amount", self.pre_deposit_cod)
-        add_calc_card(cod_group, 4, "COD Subtotal (3 month)", self.cod_subtotal_3m)
-        add_calc_card(cod_group, 5, "COD Subtotal (6 month)", self.cod_subtotal_6m)
-        add_calc_card(cod_group, 6, "Final COD Price (3 month)", self.cod_final_3m)
-        add_calc_card(cod_group, 7, "Final COD Price (6 month)", self.cod_final_6m)
-
-        # 12-13. Separate Calculate section
-        calc_btn = tk.Button(button_group, text="CALCULATE", command=self.recalc,
+        # Separate CALCULATE section.
+        calc_row = len(labels) + 2
+        sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
+        sep.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=(6, 5))
+        calc_row += 1
+        calc_btn = tk.Button(calc_body, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
                              relief="flat", padx=15, pady=10, cursor="hand2")
-        calc_btn.grid(row=0, column=0, columnspan=2, sticky="ew")
+        calc_btn.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=2)
 
-        # 14-16. Total Cost + Requested Profit section at the bottom
-        add_calc_card(bottom_group, 0, "Total Cost", self.total_cost)
-        add_calc_card(bottom_group, 1, "Requested Profit", self.profit, editable=True)
+        # Final section: Total Cost and Requested Profit.
+        calc_row += 1
+        sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
+        sep.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=(6, 5))
+        calc_row += 1
+        final_values = [("Total Cost", self.total_cost, False), ("Requested Profit", self.profit, True)]
+        for j, (lab, var, editable) in enumerate(final_values):
+            card = tk.Frame(calc_body, bg="#FFFFFF", highlightbackground="#D4E2F0",
+                            highlightthickness=1, padx=8, pady=6)
+            card.grid(row=calc_row + j, column=0, columnspan=2, sticky="ew", pady=2)
+            card.columnconfigure(1, weight=1)
+            tk.Label(card, text=lab, bg="#FFFFFF", fg="#17324D",
+                     font=("Segoe UI", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", padx=(2, 8))
+            if editable:
+                ent = tk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"),
+                               bg="#FFFFFF", fg="#17324D", insertbackground="#0878D1",
+                               relief="solid", bd=1, highlightthickness=1,
+                               highlightbackground="#C8D6E5", highlightcolor="#0878D1")
+                ent.grid(row=0, column=1, sticky="ew")
+                ent.bind("<KeyRelease>", lambda e: self.recalc())
+                self.profit_entry = ent
+                ent.bind("<Return>", lambda event: self.focus_weight_entry())
+            else:
+                ent = tk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"),
+                               bg="#FFFFFF", fg="#17324D", relief="flat", bd=0,
+                               highlightthickness=0, state="readonly", readonlybackground="#FFFFFF")
+                ent.grid(row=0, column=1, sticky="ew")
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
