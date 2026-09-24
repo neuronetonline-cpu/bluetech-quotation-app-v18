@@ -601,9 +601,11 @@ class App:
             if j == 2:
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 1, 3))
             elif j == 3:
+                # QTY -> same field in next row; last QTY -> Requested Profit
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_or_profit(widget, 2))
             elif j == 4:
-                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_profit(widget, 3))
+                # COST -> same field in next row; last COST -> first QTY
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 3, 2))
 
         btn = tk.Button(self.table, text="✕", width=4,
                         command=lambda rr=r: self.remove_row(rr),
