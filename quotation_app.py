@@ -1393,12 +1393,13 @@ class App:
 
         win = tk.Toplevel(self.root)
         win.title("Bluetech Computers - Invoice")
-        win.geometry("1050x700")
-        win.minsize(900, 600)
+        win.geometry("1050x760")
+        win.minsize(900, 620)
 
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
-        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 15, "bold")).pack(side="left")
+        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 17, "bold")).pack(side="left")
+        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 10, "bold")).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
@@ -1428,16 +1429,54 @@ class App:
             unit_price_toggle.config(text="ON" if show_unit_price.get() else "OFF")
             rebuild_table()
         unit_price_toggle.config(command=toggle_unit_price)
-        payment_methods = [x.strip() for x in get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()]
-        if not payment_methods:
-            payment_methods = ["CASH"]
+        payment_methods = [x.strip() for x in get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()] or ["CASH"]
         payment_method = tk.StringVar(value=payment_methods[0])
         ttk.Label(controls, text="Payment Method:").pack(side="left", padx=(25,5))
         payment_combo = ttk.Combobox(controls, textvariable=payment_method, values=payment_methods, state="readonly", width=24)
         payment_combo.pack(side="left")
 
-        box = ttk.LabelFrame(win, text="Invoice Items", padding=8)
-        box.pack(fill="both", expand=True, padx=10, pady=4)
+        # Scrollable invoice body
+        outer = ttk.Frame(win)
+        outer.pack(fill="both", expand=True, padx=6, pady=2)
+        body_canvas = tk.Canvas(outer, highlightthickness=0)
+        body_scroll = ttk.Scrollbar(outer, orient="vertical", command=body_canvas.yview)
+        body = ttk.Frame(body_canvas)
+        body.bind("<Configure>", lambda e: body_canvas.configure(scrollregion=body_canvas.bbox("all")))
+        body_canvas.create_window((0,0), window=body, anchor="nw")
+        body_canvas.configure(yscrollcommand=body_scroll.set)
+        body_canvas.pack(side="left", fill="both", expand=True)
+        body_scroll.pack(side="right", fill="y")
+        body_canvas.bind_all("<MouseWheel>", lambda e: body_canvas.yview_scroll(int(-e.delta/120), "units"))
+
+        payment_box = ttk.LabelFrame(body, text="Payment Breakdown", padding=6)
+        payment_box.pack(fill="x", padx=4, pady=4)
+        payment_rows = []
+        payment_total_var = tk.StringVar(value="LKR 0.00")
+        def add_payment_row(method=None, amount="0"):
+            row = ttk.Frame(payment_box)
+            row.pack(fill="x", pady=2)
+            method_var = tk.StringVar(value=method or payment_methods[0])
+            amount_var = tk.StringVar(value=amount)
+            combo = ttk.Combobox(row, textvariable=method_var, values=payment_methods, state="readonly", width=25)
+            combo.pack(side="left", padx=(2,6))
+            ttk.Entry(row, textvariable=amount_var, width=18, justify="right").pack(side="left")
+            def remove():
+                row.destroy(); payment_rows.remove((method_var, amount_var)); calc_payments()
+            ttk.Button(row, text="−", width=3, command=remove).pack(side="left", padx=6)
+            payment_rows.append((method_var, amount_var))
+            amount_var.trace_add("write", lambda *_: calc_payments())
+            return amount_var
+        def calc_payments():
+            total = sum(max(0, self.num(a.get())) for _, a in payment_rows)
+            payment_total_var.set(money(total))
+        ttk.Button(payment_box, text="+ ADD PAYMENT", command=add_payment_row).pack(anchor="w", pady=(0,4))
+        payment_summary = ttk.Frame(payment_box); payment_summary.pack(fill="x")
+        ttk.Label(payment_summary, text="Payments Total:", font=("Segoe UI",10,"bold")).pack(side="left")
+        ttk.Label(payment_summary, textvariable=payment_total_var, font=("Segoe UI",10,"bold")).pack(side="left", padx=8)
+        add_payment_row(payment_methods[0], "0")
+
+        box = ttk.LabelFrame(body, text="Invoice Items", padding=8)
+        box.pack(fill="x", padx=4, pady=4)
         invoice_rows = []
         sc_pv = tk.StringVar(value="SERVICE CHARGER")
         sc_dv = tk.StringVar(value="SERVICE CHARGE")
@@ -1463,8 +1502,7 @@ class App:
             invoice_rows.clear()
             headers = ["#", "PRODUCT", "DESCRIPTION", "QTY"]
             if show_unit_price.get():
-                headers.append("UNIT PRICE")
-            headers.append("AMOUNT")
+                headers.extend(["UNIT PRICE", "AMOUNT"])
             for j,h in enumerate(headers):
                 ttk.Label(box, text=h, font=("Segoe UI",9,"bold")).grid(row=0,column=j,padx=4,pady=4,sticky="ew")
                 box.columnconfigure(j, weight=1)
@@ -1482,7 +1520,7 @@ class App:
                 if show_unit_price.get():
                     ttk.Entry(box,textvariable=uv,justify="right").grid(row=idx,column=col,padx=2,pady=2,sticky="ew")
                     col+=1
-                ttk.Label(box,textvariable=av,anchor="e").grid(row=idx,column=col,padx=4,pady=2,sticky="ew")
+                    ttk.Label(box,textvariable=av,anchor="e").grid(row=idx,column=col,padx=4,pady=2,sticky="ew")
                 invoice_rows.append((pv,dv,qv,uv,av))
                 qv.trace_add("write",calc_invoice); uv.trace_add("write",calc_invoice)
             r=len(invoice_rows)+1
@@ -1492,7 +1530,7 @@ class App:
             col=4
             if show_unit_price.get():
                 ttk.Label(box,textvariable=sc_uv,anchor="e").grid(row=r,column=col,padx=2,pady=2,sticky="ew"); col+=1
-            ttk.Label(box,textvariable=sc_av,anchor="e").grid(row=r,column=col,padx=4,pady=2,sticky="ew")
+                ttk.Label(box,textvariable=sc_av,anchor="e").grid(row=r,column=col,padx=4,pady=2,sticky="ew")
             ttk.Label(box,text="TOTAL",font=("Segoe UI",10,"bold")).grid(row=r+1,column=col-1,sticky="e",padx=4,pady=8)
             ttk.Label(box,textvariable=total_var,font=("Segoe UI",10,"bold"),anchor="e").grid(row=r+1,column=col,sticky="ew",padx=4,pady=8)
             calc_invoice()
@@ -1513,7 +1551,20 @@ class App:
             rows.append(("SERVICE CHARGER",sc_dv.get().strip().upper(),self.num(sc_qv.get()),self.num(sc_uv.get()),self.num(sc_av.get().replace("LKR",""))))
             return rows
 
+        def validate_payments():
+            calc_invoice(); calc_payments()
+            invoice_total = self.num(total_var.get())
+            paid_total = sum(max(0, self.num(a.get())) for _, a in payment_rows)
+            if abs(paid_total - invoice_total) > 0.01:
+                messagebox.showwarning("Payment", f"Payment total must equal invoice total.\nInvoice Total: {money(invoice_total)}\nPayments Total: {money(paid_total)}", parent=win)
+                return False
+            return True
+
+        def payment_lines():
+            return [(m.get().strip(), max(0, self.num(a.get()))) for m,a in payment_rows if m.get().strip() and max(0,self.num(a.get())) > 0]
+
         def save_invoice_pdf():
+            if not validate_payments(): return
             calc_invoice()
             filename=os.path.join(get_pdf_dir(),f"{invoice_no.get()}_INVOICE.pdf")
             c=canvas.Canvas(filename,pagesize=A4)
@@ -1524,25 +1575,28 @@ class App:
             def txt(s,bold=False,size=9):
                 nonlocal y
                 c.setFont("Courier-Bold" if bold else "Courier",size); c.drawString(left,y,str(s)[:95]); y-=4.2*mm
-            txt("BLUETECH COMPUTERS",True,13)
+            txt("BLUETECH COMPUTERS",True,16)
             txt("COMPUTER SALES | REPAIRS | UPGRADES",False,9)
             txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
             txt("077 633 7942 / 074 394 6233",False,8); ln()
             txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
+            txt(f"SOLD BY    : {self.prepared_by.get()}",True,9)
             txt(f"CUSTOMER   : {customer.get()}")
             txt(f"PHONE      : {phone.get()}")
             if invoice_title.get().strip(): txt(f"TITLE      : {invoice_title.get().strip()}")
-            txt(f"PAYMENT    : {payment_method.get()}"); ln()
+            txt("PAYMENT BREAKDOWN:",True,8)
+            for pm, pa in payment_lines(): txt(f"  {pm:<22} {money(pa):>15}",False,8)
+            ln()
             rows=invoice_data(); show=show_unit_price.get()
             if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,8)
-            else: txt(f"{'#':<3}{'PRODUCT':<28}{'DESCRIPTION':<31}{'QTY':>5}{'AMOUNT':>15}",True,8)
+            else: txt(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}",True,8)
             ln()
             total=0
             for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                 total+=amt
                 if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,7.5)
-                else: txt(f"{i:<3}{prod[:28]:<28}{desc[:31]:<31}{qty:>5g}{amt:>15.2f}",False,7.5)
-            ln(); txt(f"TOTAL : {total:,.2f}",True,10); txt(f"PAYMENT METHOD : {payment_method.get()}",True,8)
+                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,7.5)
+            ln(); txt(f"TOTAL : {total:,.2f}",True,10); txt("PAYMENT TOTAL : " + money(sum(pa for _, pa in payment_lines())),True,8)
             y-=2*mm; txt("WARRANTY CONDITIONS",True,9); ln()
             cond=get_setting("invoice_warranty_conditions","").replace("\\n","\n")
             for part in cond.splitlines() or [""]:
@@ -1554,6 +1608,7 @@ class App:
             messagebox.showinfo("Invoice PDF",f"Invoice PDF created:\n{filename}",parent=win)
 
         def print_invoice():
+            if not validate_payments(): return
             calc_invoice()
             if win32print is None:
                 messagebox.showerror("Printer","Windows printer support is not available.",parent=win); return
@@ -1571,18 +1626,20 @@ class App:
                 def line(s=""): lines.append(str(s)[:95])
                 line("BLUETECH COMPUTERS"); line("COMPUTER SALES | REPAIRS | UPGRADES")
                 line("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama"); line("077 633 7942 / 074 394 6233"); line("="*80)
-                line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"CUSTOMER   : {customer.get()[:65]}"); line(f"PHONE      : {phone.get()[:65]}")
+                line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"SOLD BY    : {self.prepared_by.get()}"); line(f"CUSTOMER   : {customer.get()[:65]}"); line(f"PHONE      : {phone.get()[:65]}")
                 if invoice_title.get().strip(): line(f"TITLE      : {invoice_title.get()[:65]}")
-                line(f"PAYMENT    : {payment_method.get()}"); line("-"*80)
+                line("PAYMENT BREAKDOWN:")
+                for pm, pa in payment_lines(): line(f"  {pm:<22} {money(pa):>15}")
+                line("-"*80)
                 rows=invoice_data(); total=0
                 if show_unit_price.get(): line(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}")
-                else: line(f"{'#':<3}{'PRODUCT':<28}{'DESCRIPTION':<31}{'QTY':>5}{'AMOUNT':>15}")
+                else: line(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}")
                 line("-"*80)
                 for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                     total+=amt
                     if show_unit_price.get(): line(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}")
-                    else: line(f"{i:<3}{prod[:28]:<28}{desc[:31]:<31}{qty:>5g}{amt:>15.2f}")
-                line("-"*80); line(f"TOTAL : {total:,.2f}"); line(f"PAYMENT METHOD : {payment_method.get()}"); line("="*80)
+                    else: line(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}")
+                line("-"*80); line(f"TOTAL : {total:,.2f}"); line(f"PAYMENT TOTAL : {money(sum(pa for _, pa in payment_lines()))}"); line("="*80)
                 line("WARRANTY CONDITIONS")
                 for part in get_setting("invoice_warranty_conditions","").replace("\\n","\n").splitlines(): line(part)
                 line("Thank you for your business!")
