@@ -206,26 +206,8 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Bluetech Computers - Desktop Quotation")
-
-        # Open the app at a size that automatically fits the current screen.
-        # This is calculated once at startup, so it does not create a resize/
-        # geometry feedback loop while the user is resizing the window.
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        min_w, min_h = 1000, 560
-
-        # Minimum size is fixed; maximum size follows the current screen.
-        # This keeps the window within the available display on different
-        # monitor resolutions without introducing a Configure/resize loop.
-        self.root.minsize(min_w, min_h)
-        self.root.maxsize(max(screen_w, min_w), max(screen_h, min_h))
-
-        # Start at about 90% of the available screen, respecting both limits.
-        win_w = max(min_w, min(int(screen_w * 0.90), screen_w))
-        win_h = max(min_h, min(int(screen_h * 0.88), screen_h))
-        pos_x = max(0, (screen_w - win_w) // 2)
-        pos_y = max(0, (screen_h - win_h) // 2)
-        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        self.root.geometry("1320x800")
+        self.root.minsize(1000, 560)
         self.rows = []
         self.editing_id = None
         setup_db(db)
@@ -523,7 +505,7 @@ class App:
             return
         # 16 standard rows fit in the quotation-items area. Extra rows use the
         # table's internal scrollbar. This height is deliberately constant.
-        table_height = 520
+        table_height = 540
         try:
             self.table_body.configure(height=table_height)
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
