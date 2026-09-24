@@ -24,6 +24,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
 
 
 APP_DIR = os.path.join(os.path.expanduser("~"), "BluetechQuotationApp")
@@ -123,6 +124,9 @@ def db():
         "cod_min_amount": "20000",
         "service_charger": "1500",
         "show_predeposit_cod_quotation": "0",
+        "invoice_show_unit_price": "1",
+        "invoice_warranty_conditions": "Warranty valid according to the warranty period stated on this invoice. Physical damage, liquid damage, burn damage and misuse are not covered.",
+        "invoice_payment_methods": "CASH\nBANK TRANSFER\nCARD\nCREDIT",
     }
     for key, value in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
@@ -1370,7 +1374,7 @@ class App:
         return filename
 
     def convert_to_invoice(self):
-        """Open a separate invoice window populated from the current quotation."""
+        """Open a simple dot-matrix friendly invoice window."""
         self.recalc()
         items = self.collect_items()
         if not self.customer.get().strip():
@@ -1380,89 +1384,64 @@ class App:
             messagebox.showwarning("Invoice", "Add at least one product before converting to invoice.")
             return
 
-        # Allocate the 3-month quotation total across lines in proportion to internal cost.
-        # The user can edit each invoice unit price before printing.
         quote_total = self.num(self.final90.get())
-        raw_costs = [max(0.0, self.num(c)) for _, _, q, c in items]
-        cost_total = sum(self.num(q) * c for (_, _, q, c) in items)
+        cost_total = sum(self.num(q) * max(0.0, self.num(c)) for _, _, q, c in items)
         if cost_total <= 0:
             shares = [quote_total / len(items)] * len(items)
         else:
-            shares = [(self.num(q) * c / cost_total) * quote_total for (_, _, q, c) in items]
+            shares = [(self.num(q) * max(0.0, self.num(c)) / cost_total) * quote_total for _, _, q, c in items]
 
         win = tk.Toplevel(self.root)
         win.title("Bluetech Computers - Invoice")
         win.geometry("1050x700")
         win.minsize(900, 600)
 
-        top = ttk.Frame(win, padding=12)
+        top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
-        ttk.Label(top, text="BLUETECH COMPUTERS", font=("Segoe UI", 18, "bold")).pack(side="left")
-        ttk.Label(top, text="INVOICE", font=("Segoe UI", 18, "bold")).pack(side="right")
+        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 15, "bold")).pack(side="left")
 
-        info = ttk.LabelFrame(win, text="Invoice Details", padding=10)
-        info.pack(fill="x", padx=12, pady=5)
+        info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
+        info.pack(fill="x", padx=10, pady=4)
         invoice_no = tk.StringVar(value=next_invoice_no())
         invoice_date = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         customer = tk.StringVar(value=self.customer.get().strip())
         phone = tk.StringVar(value=self.phone.get().strip())
         invoice_title = tk.StringVar(value=self.quotation_title.get().strip())
-        fields = [
-            ("Invoice No.", invoice_no), ("Customer Name", customer),
-            ("WhatsApp / Phone", phone), ("Date", invoice_date)
-        ]
+        fields = [("Invoice No.", invoice_no), ("Customer Name", customer), ("WhatsApp / Phone", phone), ("Date", invoice_date)]
         for i, (lab, var) in enumerate(fields):
-            ttk.Label(info, text=lab).grid(row=0, column=i*2, sticky="w", padx=5)
-            ttk.Entry(info, textvariable=var, width=24).grid(row=0, column=i*2+1, sticky="ew", padx=5)
+            ttk.Label(info, text=lab).grid(row=0, column=i*2, sticky="w", padx=4)
+            ttk.Entry(info, textvariable=var, width=22).grid(row=0, column=i*2+1, sticky="ew", padx=4)
             info.columnconfigure(i*2+1, weight=1)
-        ttk.Label(info, text="Invoice Title").grid(row=1, column=0, sticky="w", padx=5, pady=(6, 0))
-        ttk.Entry(info, textvariable=invoice_title).grid(row=1, column=1, columnspan=3, sticky="ew", padx=5, pady=(6, 0))
+        ttk.Label(info, text="Invoice Title").grid(row=1, column=0, sticky="w", padx=4, pady=(5,0))
+        ttk.Entry(info, textvariable=invoice_title).grid(row=1, column=1, columnspan=3, sticky="ew", padx=4, pady=(5,0))
+
+        controls = ttk.Frame(win, padding=(10, 2))
+        controls.pack(fill="x")
+        show_unit_price = tk.BooleanVar(value=get_setting("invoice_show_unit_price", "1") == "1")
+        ttk.Checkbutton(controls, text="SHOW UNIT PRICE", variable=show_unit_price,
+                        command=lambda: (set_setting("invoice_show_unit_price", "1" if show_unit_price.get() else "0"), rebuild_table())).pack(side="left")
+        payment_methods = [x.strip() for x in get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()]
+        if not payment_methods:
+            payment_methods = ["CASH"]
+        payment_method = tk.StringVar(value=payment_methods[0])
+        ttk.Label(controls, text="Payment Method:").pack(side="left", padx=(25,5))
+        payment_combo = ttk.Combobox(controls, textvariable=payment_method, values=payment_methods, state="readonly", width=24)
+        payment_combo.pack(side="left")
 
         box = ttk.LabelFrame(win, text="Invoice Items", padding=8)
-        box.pack(fill="both", expand=True, padx=12, pady=5)
-        headers = ["PRODUCT", "DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]
-        for j, h in enumerate(headers):
-            ttk.Label(box, text=h, font=("Segoe UI", 9, "bold")).grid(row=0, column=j, padx=4, pady=4, sticky="ew")
-        for j, w in enumerate((24, 38, 10, 18, 18)):
-            box.columnconfigure(j, weight=1, minsize=w*7)
-
+        box.pack(fill="both", expand=True, padx=10, pady=4)
         invoice_rows = []
-        for idx, ((prod, desc, qty, _cost), share) in enumerate(zip(items, shares), start=1):
-            pv, dv = tk.StringVar(value=prod), tk.StringVar(value=desc)
-            qv = tk.StringVar(value=str(int(qty) if float(qty).is_integer() else qty))
-            unit_default = share / self.num(qty) if self.num(qty) else share
-            uv = tk.StringVar(value=f"{unit_default:.2f}")
-            av = tk.StringVar(value="LKR 0.00")
-            ttk.Entry(box, textvariable=pv).grid(row=idx, column=0, padx=2, pady=2, sticky="ew")
-            ttk.Entry(box, textvariable=dv, justify="center").grid(row=idx, column=1, padx=2, pady=2, sticky="ew")
-            ttk.Entry(box, textvariable=qv).grid(row=idx, column=2, padx=2, pady=2, sticky="ew")
-            ttk.Entry(box, textvariable=uv, justify="right").grid(row=idx, column=3, padx=2, pady=2, sticky="ew")
-            ttk.Label(box, textvariable=av, anchor="e").grid(row=idx, column=4, padx=5, pady=2, sticky="ew")
-            invoice_rows.append((pv, dv, qv, uv, av))
-
-        # Service Charger is always a separate invoice line, editable, default LKR 1,500.
         sc_pv = tk.StringVar(value="SERVICE CHARGER")
         sc_dv = tk.StringVar(value="SERVICE CHARGE")
         sc_qv = tk.StringVar(value="1")
-        sc_uv = tk.StringVar(value="1500")
+        sc_uv = tk.StringVar(value=str(max(0, self.num(self.service_charger.get()))))
         sc_av = tk.StringVar(value="LKR 0.00")
-        service_row_index = len(invoice_rows) + 1
-        ttk.Entry(box, textvariable=sc_pv, state="readonly").grid(row=service_row_index, column=0, padx=2, pady=2, sticky="ew")
-        ttk.Entry(box, textvariable=sc_dv, justify="center").grid(row=service_row_index, column=1, padx=2, pady=2, sticky="ew")
-        ttk.Entry(box, textvariable=sc_qv, justify="center").grid(row=service_row_index, column=2, padx=2, pady=2, sticky="ew")
-        ttk.Entry(box, textvariable=sc_uv, justify="right").grid(row=service_row_index, column=3, padx=2, pady=2, sticky="ew")
-        ttk.Label(box, textvariable=sc_av, anchor="e").grid(row=service_row_index, column=4, padx=5, pady=2, sticky="ew")
-
         total_var = tk.StringVar(value="LKR 0.00")
-        ttk.Label(box, text="TOTAL", font=("Segoe UI", 10, "bold")).grid(row=service_row_index+1, column=3, sticky="e", padx=5, pady=10)
-        ttk.Label(box, textvariable=total_var, font=("Segoe UI", 11, "bold"), anchor="e").grid(row=service_row_index+1, column=4, sticky="ew", padx=5, pady=10)
 
         def calc_invoice(*_):
             total = 0.0
             for pv, dv, qv, uv, av in invoice_rows:
-                qty = self.num(qv.get())
-                unit = self.num(uv.get())
-                amount = qty * unit
+                amount = self.num(qv.get()) * self.num(uv.get())
                 total += amount
                 av.set(money(amount))
             sc_amount = self.num(sc_qv.get()) * self.num(sc_uv.get())
@@ -1470,147 +1449,148 @@ class App:
             sc_av.set(money(sc_amount))
             total_var.set(money(total))
 
-        for row in invoice_rows:
-            row[2].trace_add("write", calc_invoice)
-            row[3].trace_add("write", calc_invoice)
-        sc_qv.trace_add("write", calc_invoice)
-        sc_uv.trace_add("write", calc_invoice)
-        calc_invoice()
+        def rebuild_table():
+            for w in box.winfo_children():
+                w.destroy()
+            invoice_rows.clear()
+            headers = ["#", "PRODUCT", "DESCRIPTION", "QTY"]
+            if show_unit_price.get():
+                headers.append("UNIT PRICE")
+            headers.append("AMOUNT")
+            for j,h in enumerate(headers):
+                ttk.Label(box, text=h, font=("Segoe UI",9,"bold")).grid(row=0,column=j,padx=4,pady=4,sticky="ew")
+                box.columnconfigure(j, weight=1)
+            for idx, ((prod, desc, qty, _cost), share) in enumerate(zip(items, shares), start=1):
+                pv,dv=tk.StringVar(value=prod),tk.StringVar(value=desc)
+                qv=tk.StringVar(value=str(int(qty) if float(qty).is_integer() else qty))
+                unit_default=share/self.num(qty) if self.num(qty) else share
+                uv=tk.StringVar(value=f"{unit_default:.2f}")
+                av=tk.StringVar(value="LKR 0.00")
+                ttk.Label(box,text=str(idx)).grid(row=idx,column=0,padx=2,pady=2)
+                ttk.Entry(box,textvariable=pv).grid(row=idx,column=1,padx=2,pady=2,sticky="ew")
+                ttk.Entry(box,textvariable=dv,justify="center").grid(row=idx,column=2,padx=2,pady=2,sticky="ew")
+                ttk.Entry(box,textvariable=qv,justify="center").grid(row=idx,column=3,padx=2,pady=2,sticky="ew")
+                col=4
+                if show_unit_price.get():
+                    ttk.Entry(box,textvariable=uv,justify="right").grid(row=idx,column=col,padx=2,pady=2,sticky="ew")
+                    col+=1
+                ttk.Label(box,textvariable=av,anchor="e").grid(row=idx,column=col,padx=4,pady=2,sticky="ew")
+                invoice_rows.append((pv,dv,qv,uv,av))
+                qv.trace_add("write",calc_invoice); uv.trace_add("write",calc_invoice)
+            r=len(invoice_rows)+1
+            ttk.Label(box,text="SERVICE CHARGER").grid(row=r,column=1,padx=2,pady=2,sticky="w")
+            ttk.Label(box,textvariable=sc_dv).grid(row=r,column=2,padx=2,pady=2,sticky="ew")
+            ttk.Label(box,textvariable=sc_qv).grid(row=r,column=3,padx=2,pady=2)
+            col=4
+            if show_unit_price.get():
+                ttk.Label(box,textvariable=sc_uv,anchor="e").grid(row=r,column=col,padx=2,pady=2,sticky="ew"); col+=1
+            ttk.Label(box,textvariable=sc_av,anchor="e").grid(row=r,column=col,padx=4,pady=2,sticky="ew")
+            ttk.Label(box,text="TOTAL",font=("Segoe UI",10,"bold")).grid(row=r+1,column=col-1,sticky="e",padx=4,pady=8)
+            ttk.Label(box,textvariable=total_var,font=("Segoe UI",10,"bold"),anchor="e").grid(row=r+1,column=col,sticky="ew",padx=4,pady=8)
+            calc_invoice()
 
-        note = ttk.Label(win, text="English invoice format for Epson LQ-300+ continuous paper.", foreground=GREY)
-        note.pack(anchor="w", padx=15, pady=(0, 4))
+        sc_qv.trace_add("write",calc_invoice); sc_uv.trace_add("write",calc_invoice)
+        rebuild_table()
 
-        actions = ttk.Frame(win, padding=10)
-        actions.pack(fill="x")
+        ttk.Label(win,text="Dot-matrix friendly invoice: text and horizontal separators only.",foreground=GREY).pack(anchor="w",padx=12,pady=(0,4))
+        actions=ttk.Frame(win,padding=8); actions.pack(fill="x")
+
+        def invoice_data():
+            rows=[]
+            for pv,dv,qv,uv,av in invoice_rows:
+                prod=pv.get().strip().upper()
+                if prod=="PSU": prod="POWER SUPPLY UNIT"
+                elif prod=="HDD": prod="HARD DISK DRIVE"
+                rows.append((prod,dv.get().strip().upper(),self.num(qv.get()),self.num(uv.get()),self.num(av.get().replace("LKR",""))))
+            rows.append(("SERVICE CHARGER",sc_dv.get().strip().upper(),self.num(sc_qv.get()),self.num(sc_uv.get()),self.num(sc_av.get().replace("LKR",""))))
+            return rows
 
         def save_invoice_pdf():
             calc_invoice()
-            pdf_dir = get_pdf_dir()
-            filename = os.path.join(pdf_dir, f"{invoice_no.get()}_INVOICE.pdf")
-            styles = getSampleStyleSheet()
-            normal = ParagraphStyle("inv_normal", parent=styles["BodyText"], fontSize=8.5, leading=10.5, textColor=colors.HexColor(DARK_BLUE))
-            small = ParagraphStyle("inv_small", parent=normal, fontSize=7.5, leading=9)
-            header_style = ParagraphStyle("inv_header", parent=styles["Heading1"], fontSize=20, leading=22, textColor=colors.HexColor(DARK_BLUE))
-            doc = SimpleDocTemplate(filename, pagesize=A4, rightMargin=12*mm, leftMargin=12*mm, topMargin=10*mm, bottomMargin=10*mm, title=f"Invoice {invoice_no.get()}", author="Bluetech Computers")
-            story = []
-            story.append(Paragraph("BLUETECH COMPUTERS", header_style))
-            story.append(Paragraph("Computer Sales | Repairs | Upgrades", normal))
-            story.append(Spacer(1, 4))
-            story.append(Paragraph("077 633 7942 &nbsp;&nbsp; 074 394 6233<br/>230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama", small))
-            story.append(Spacer(1, 7))
-            info_data = [[Paragraph("<b>INVOICE</b>", header_style), Paragraph(f"<b>Invoice No</b> : {invoice_no.get()}<br/><b>Date</b> : {invoice_date.get()}<br/><b>Customer</b> : {customer.get()}<br/><b>Phone / WhatsApp</b> : {phone.get()}<br/><b>Invoice Title</b> : {invoice_title.get() or '-'}", normal)]]
-            info_t = Table(info_data, colWidths=[80*mm, 100*mm])
-            info_t.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(1,0),(1,0),colors.HexColor("#F6FAFF")),("BOX",(1,0),(1,0),0.7,colors.HexColor("#B8D8F5")),("LEFTPADDING",(0,0),(-1,-1),6),("RIGHTPADDING",(0,0),(-1,-1),6),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
-            story.append(info_t)
-            story.append(Spacer(1, 7))
-            if invoice_title.get().strip():
-                story.append(Paragraph(f"<b>{invoice_title.get().strip()}</b>", ParagraphStyle("it", parent=normal, fontSize=11, leading=13, textColor=colors.HexColor(BLUE))))
-                story.append(Spacer(1, 4))
-            data = [["#", "PRODUCT", "PRODUCT DESCRIPTION", "QTY", "UNIT PRICE", "AMOUNT"]]
-            for i, (pv,dv,qv,uv,av) in enumerate(invoice_rows, 1):
-                prod = pv.get().strip().upper()
-                if prod == "PSU": prod = "POWER SUPPLY UNIT"
-                elif prod == "HDD": prod = "HARD DISK DRIVE"
-                data.append([str(i), prod, dv.get().strip().upper(), str(self.num(qv.get())), money(self.num(uv.get())), money(self.num(qv.get())*self.num(uv.get()))])
-            data.append([str(len(invoice_rows)+1), "SERVICE CHARGER", sc_dv.get().strip().upper(), str(self.num(sc_qv.get())), money(self.num(sc_uv.get())), money(self.num(sc_qv.get())*self.num(sc_uv.get()))])
-            t=Table(data, colWidths=[9*mm, 42*mm, 70*mm, 14*mm, 22*mm, 23*mm], repeatRows=1)
-            t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor(BLUE)),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),8.2),("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#B7C3D0")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(2,0),(2,-1),"CENTER"),("ALIGN",(3,0),(-1,-1),"RIGHT"),("ALIGN",(0,0),(0,-1),"CENTER"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F3F7FB")]),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-            story.append(t)
-            story.append(Spacer(1,7))
-            story.append(Paragraph(f"<b>TOTAL : {total_var.get()}</b>", ParagraphStyle("total", parent=normal, fontSize=12, alignment=TA_RIGHT, textColor=colors.HexColor(DARK_BLUE))))
-            if self.show_predeposit_cod.get() and self.num(self.pre_deposit_cod.get()) > 0:
-                story.append(Spacer(1,5))
-                cod_box=Table([[Paragraph("Pre Deposit COD Amount", small), Paragraph(money(self.num(self.pre_deposit_cod.get())), ParagraphStyle("cod", parent=normal, fontSize=9, alignment=TA_RIGHT, textColor=colors.HexColor(DARK_BLUE))) ]], colWidths=[45*mm,35*mm])
-                cod_box.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),colors.HexColor("#FFF8E8")),("BOX",(0,0),(-1,-1),0.7,colors.HexColor("#F0B429")),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5),("TOPPADDING",(0,0),(-1,-1),4),("BOTTOMPADDING",(0,0),(-1,-1),4)]))
-                story.append(cod_box)
-            story.append(Spacer(1,8))
-            story.append(Paragraph("Thank you for your business!", ParagraphStyle("thanks", parent=normal, fontSize=10, alignment=TA_CENTER)))
-            doc.build(story)
-            try:
-                if sys.platform.startswith("win"): os.startfile(filename)
-                elif sys.platform == "darwin": subprocess.Popen(["open", filename])
-                else: subprocess.Popen(["xdg-open", filename])
+            filename=os.path.join(get_pdf_dir(),f"{invoice_no.get()}_INVOICE.pdf")
+            c=canvas.Canvas(filename,pagesize=A4)
+            width,height=A4
+            left=28*mm; right=28*mm; y=height-25*mm
+            def ln():
+                nonlocal y; c.line(left,y,right,y); y-=4*mm
+            def txt(s,bold=False,size=9):
+                nonlocal y
+                c.setFont("Courier-Bold" if bold else "Courier",size); c.drawString(left,y,str(s)[:95]); y-=4.2*mm
+            txt("BLUETECH COMPUTERS",True,13)
+            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,9)
+            txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
+            txt("077 633 7942 / 074 394 6233",False,8); ln()
+            txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
+            txt(f"CUSTOMER   : {customer.get()}")
+            txt(f"PHONE      : {phone.get()}")
+            if invoice_title.get().strip(): txt(f"TITLE      : {invoice_title.get().strip()}")
+            txt(f"PAYMENT    : {payment_method.get()}"); ln()
+            rows=invoice_data(); show=show_unit_price.get()
+            if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,8)
+            else: txt(f"{'#':<3}{'PRODUCT':<28}{'DESCRIPTION':<31}{'QTY':>5}{'AMOUNT':>15}",True,8)
+            ln()
+            total=0
+            for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
+                total+=amt
+                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,7.5)
+                else: txt(f"{i:<3}{prod[:28]:<28}{desc[:31]:<31}{qty:>5g}{amt:>15.2f}",False,7.5)
+            ln(); txt(f"TOTAL : {total:,.2f}",True,10); txt(f"PAYMENT METHOD : {payment_method.get()}",True,8)
+            y-=2*mm; txt("WARRANTY CONDITIONS",True,9); ln()
+            cond=get_setting("invoice_warranty_conditions","").replace("\\n","\n")
+            for part in cond.splitlines() or [""]:
+                txt(part,False,7.5)
+            y-=2*mm; txt("Thank you for your business!",False,8)
+            c.save()
+            try: os.startfile(filename)
             except Exception: pass
-            messagebox.showinfo("Invoice PDF", f"Invoice PDF created:\n{filename}", parent=win)
+            messagebox.showinfo("Invoice PDF",f"Invoice PDF created:\n{filename}",parent=win)
 
         def print_invoice():
             calc_invoice()
             if win32print is None:
-                messagebox.showerror("Printer", "Windows printer support is not available. Install the app with the updated requirements first.", parent=win)
-                return
-            printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)]
+                messagebox.showerror("Printer","Windows printer support is not available.",parent=win); return
+            printers=[p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL|win32print.PRINTER_ENUM_CONNECTIONS)]
             if not printers:
-                messagebox.showerror("Printer", "No Windows printers were found.", parent=win)
-                return
-            printer_win = tk.Toplevel(win)
-            printer_win.title("Select Printer")
-            printer_win.geometry("520x180")
-            ttk.Label(printer_win, text="Printer").pack(anchor="w", padx=15, pady=(15, 5))
-            try:
-                default_printer = win32print.GetDefaultPrinter()
-            except Exception:
-                default_printer = printers[0]
-            printer_var = tk.StringVar(value=default_printer if default_printer in printers else printers[0])
-            combo = ttk.Combobox(printer_win, textvariable=printer_var, values=printers, state="readonly", width=58)
-            combo.pack(padx=15, fill="x")
-
+                messagebox.showerror("Printer","No Windows printers were found.",parent=win); return
+            pw=tk.Toplevel(win); pw.title("Select Printer"); pw.geometry("520x180")
+            ttk.Label(pw,text="Printer").pack(anchor="w",padx=15,pady=(15,5))
+            try: default=win32print.GetDefaultPrinter()
+            except Exception: default=printers[0]
+            pv=tk.StringVar(value=default if default in printers else printers[0])
+            ttk.Combobox(pw,textvariable=pv,values=printers,state="readonly",width=58).pack(padx=15,fill="x")
             def do_print():
-                printer_name = printer_var.get()
-                lines = []
-                def line(txt=""):
-                    lines.append(str(txt)[:80])
-                line("BLUETECH COMPUTERS")
-                line("COMPUTER SALES | REPAIRS | UPGRADES")
-                line("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama")
-                line("077 633 7942 / 074 394 6233")
-                line("=" * 80)
-                line(f"INVOICE: {invoice_no.get():<22} DATE: {invoice_date.get()}")
-                line(f"CUSTOMER: {customer.get()[:60]}")
-                line(f"PHONE   : {phone.get()[:60]}")
-                line(f"INVOICE TITLE: {invoice_title.get()[:52]}")
-                line("-" * 80)
-                line(f"{'PRODUCT':<22} {'DESCRIPTION':<27} {'QTY':>5} {'UNIT PRICE':>11} {'AMOUNT':>12}")
-                line("-" * 80)
-                total = 0.0
-                for pv, dv, qv, uv, av in invoice_rows:
-                    qty = self.num(qv.get()); unit = self.num(uv.get()); amount = qty * unit; total += amount
-                    product_text = pv.get().strip().upper()
-                    if product_text == "PSU": product_text = "POWER SUPPLY UNIT"
-                    elif product_text == "HDD": product_text = "HARD DISK DRIVE"
-                    product_text = product_text[:22]
-                    desc_text = dv.get().strip().upper()[:27]
-                    line(f"{product_text:<22} {desc_text:<27} {qty:>5g} {unit:>11.2f} {amount:>12.2f}")
-                sc_qty = self.num(sc_qv.get()); sc_unit = self.num(sc_uv.get()); sc_amount = sc_qty * sc_unit
-                line(f"{'SERVICE CHARGER':<22} {sc_dv.get().strip().upper()[:27]:<27} {sc_qty:>5g} {sc_unit:>11.2f} {sc_amount:>12.2f}")
-                total += sc_amount
-                line("-" * 80)
-                line(f"{'TOTAL':>68} {total:>12.2f}")
-                if self.show_predeposit_cod.get() and self.num(self.pre_deposit_cod.get()) > 0:
-                    line(f"PRE DEPOSIT COD AMOUNT: {self.num(self.pre_deposit_cod.get()):.2f}")
-                line("=" * 80)
-                line("Warranty: As stated on the quotation / invoice.")
+                lines=[]
+                def line(s=""): lines.append(str(s)[:95])
+                line("BLUETECH COMPUTERS"); line("COMPUTER SALES | REPAIRS | UPGRADES")
+                line("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama"); line("077 633 7942 / 074 394 6233"); line("="*80)
+                line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"CUSTOMER   : {customer.get()[:65]}"); line(f"PHONE      : {phone.get()[:65]}")
+                if invoice_title.get().strip(): line(f"TITLE      : {invoice_title.get()[:65]}")
+                line(f"PAYMENT    : {payment_method.get()}"); line("-"*80)
+                rows=invoice_data(); total=0
+                if show_unit_price.get(): line(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}")
+                else: line(f"{'#':<3}{'PRODUCT':<28}{'DESCRIPTION':<31}{'QTY':>5}{'AMOUNT':>15}")
+                line("-"*80)
+                for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
+                    total+=amt
+                    if show_unit_price.get(): line(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}")
+                    else: line(f"{i:<3}{prod[:28]:<28}{desc[:31]:<31}{qty:>5g}{amt:>15.2f}")
+                line("-"*80); line(f"TOTAL : {total:,.2f}"); line(f"PAYMENT METHOD : {payment_method.get()}"); line("="*80)
+                line("WARRANTY CONDITIONS")
+                for part in get_setting("invoice_warranty_conditions","").replace("\\n","\n").splitlines(): line(part)
                 line("Thank you for your business!")
-                data = "\r\n".join(lines) + "\r\n\f"
+                data="\r\n".join(lines)+"\r\n\f"
                 try:
-                    h = win32print.OpenPrinter(printer_name)
+                    h=win32print.OpenPrinter(pv.get())
                     try:
-                        win32print.StartDocPrinter(h, 1, (invoice_no.get(), None, "RAW"))
-                        win32print.StartPagePrinter(h)
-                        win32print.WritePrinter(h, data.encode("cp437", errors="replace"))
-                        win32print.EndPagePrinter(h)
-                        win32print.EndDocPrinter(h)
-                    finally:
-                        win32print.ClosePrinter(h)
-                    messagebox.showinfo("Invoice", f"Invoice sent to {printer_name}.", parent=printer_win)
-                    printer_win.destroy()
-                except Exception as e:
-                    messagebox.showerror("Printer", f"Could not print invoice:\n{e}", parent=printer_win)
+                        win32print.StartDocPrinter(h,1,(invoice_no.get(),None,"RAW")); win32print.StartPagePrinter(h); win32print.WritePrinter(h,data.encode("cp437",errors="replace")); win32print.EndPagePrinter(h); win32print.EndDocPrinter(h)
+                    finally: win32print.ClosePrinter(h)
+                    messagebox.showinfo("Invoice",f"Invoice sent to {pv.get()}.",parent=pw); pw.destroy()
+                except Exception as e: messagebox.showerror("Printer",f"Could not print invoice:\n{e}",parent=pw)
+            ttk.Button(pw,text="PRINT",command=do_print).pack(pady=18)
 
-            ttk.Button(printer_win, text="PRINT", command=do_print).pack(pady=18)
-
-        ttk.Button(actions, text="SAVE INVOICE PDF", command=save_invoice_pdf).pack(side="right", padx=5)
-        ttk.Button(actions, text="PRINT INVOICE", command=print_invoice).pack(side="right", padx=5)
-        ttk.Button(actions, text="CLOSE", command=win.destroy).pack(side="right", padx=5)
+        ttk.Button(actions,text="SAVE INVOICE PDF",command=save_invoice_pdf).pack(side="right",padx=5)
+        ttk.Button(actions,text="PRINT INVOICE",command=print_invoice).pack(side="right",padx=5)
+        ttk.Button(actions,text="CLOSE",command=win.destroy).pack(side="right",padx=5)
 
     def whatsapp_quotation(self):
         if not self.customer.get().strip():
@@ -1733,6 +1713,19 @@ class App:
             ttk.Entry(cod, textvariable=var, width=18).grid(row=1, column=i, padx=5, sticky="ew")
         ttk.Label(win, text="COD is calculated internally only; it is not shown on customer PDFs.", foreground=GREY).pack(anchor="w", padx=18, pady=8)
 
+        ttk.Separator(win).pack(fill="x", padx=18, pady=8)
+        ttk.Label(win, text="Invoice Settings", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(4, 6))
+        invset = ttk.Frame(win); invset.pack(fill="x", padx=18)
+        ttk.Label(invset, text="Warranty Conditions").grid(row=0, column=0, sticky="nw", padx=(0,8))
+        warranty_text = tk.Text(invset, height=4, width=72, wrap="word")
+        warranty_text.grid(row=0, column=1, sticky="ew")
+        warranty_text.insert("1.0", get_setting("invoice_warranty_conditions", ""))
+        ttk.Label(invset, text="Payment Methods (one per line)").grid(row=1, column=0, sticky="nw", padx=(0,8), pady=(8,0))
+        payment_text = tk.Text(invset, height=5, width=72, wrap="none")
+        payment_text.grid(row=1, column=1, sticky="ew", pady=(8,0))
+        payment_text.insert("1.0", get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT"))
+        invset.columnconfigure(1, weight=1)
+
         buttons = ttk.Frame(win); buttons.pack(pady=10)
         def save():
             try:
@@ -1747,6 +1740,11 @@ class App:
                 set_setting("cod_additional_kg", self.num(add_var.get()))
                 set_setting("cod_commission", self.num(comm_var.get()))
                 set_setting("cod_min_amount", self.num(min_var.get()))
+                set_setting("invoice_warranty_conditions", warranty_text.get("1.0", "end-1c").strip())
+                methods = [x.strip() for x in payment_text.get("1.0", "end-1c").splitlines() if x.strip()]
+                if not methods:
+                    raise ValueError("Add at least one payment method.")
+                set_setting("invoice_payment_methods", "\n".join(methods))
                 self.recalc()
                 self.refresh_prepared_users()
                 messagebox.showinfo("Settings", "Settings saved.", parent=win)
