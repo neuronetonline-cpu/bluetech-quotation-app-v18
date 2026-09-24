@@ -1418,8 +1418,16 @@ class App:
         controls = ttk.Frame(win, padding=(10, 2))
         controls.pack(fill="x")
         show_unit_price = tk.BooleanVar(value=get_setting("invoice_show_unit_price", "1") == "1")
-        ttk.Checkbutton(controls, text="SHOW UNIT PRICE", variable=show_unit_price,
-                        command=lambda: (set_setting("invoice_show_unit_price", "1" if show_unit_price.get() else "0"), rebuild_table())).pack(side="left")
+        ttk.Label(controls, text="SHOW UNIT PRICE:", font=("Segoe UI", 9, "bold")).pack(side="left")
+        unit_price_toggle = tk.Button(controls, text="ON" if show_unit_price.get() else "OFF", width=7,
+                                      font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2")
+        unit_price_toggle.pack(side="left", padx=(5, 18))
+        def toggle_unit_price():
+            show_unit_price.set(not show_unit_price.get())
+            set_setting("invoice_show_unit_price", "1" if show_unit_price.get() else "0")
+            unit_price_toggle.config(text="ON" if show_unit_price.get() else "OFF")
+            rebuild_table()
+        unit_price_toggle.config(command=toggle_unit_price)
         payment_methods = [x.strip() for x in get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()]
         if not payment_methods:
             payment_methods = ["CASH"]
@@ -1634,125 +1642,137 @@ class App:
     def settings(self):
         win = tk.Toplevel(self.root)
         win.title("Settings")
-        win.geometry("760x520")
-        win.resizable(False, False)
+        win.geometry("900x720")
+        win.minsize(860, 650)
+        win.transient(self.root)
+        win.grab_set()
 
-        ttk.Label(win, text="PDF / Quotation Save Location", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(18, 8))
-        row = ttk.Frame(win)
-        row.pack(fill="x", padx=18)
+        outer = ttk.Frame(win, padding=12)
+        outer.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(outer, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        body = ttk.Frame(canvas)
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=body, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        canvas.bind_all("<MouseWheel>", wheel, add="+")
+
+        ttk.Label(body, text="PDF / Quotation Save Location", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 8))
+        path_row = ttk.Frame(body); path_row.pack(fill="x")
         path_var = tk.StringVar(value=get_pdf_dir())
-        entry = ttk.Entry(row, textvariable=path_var)
-        entry.pack(side="left", fill="x", expand=True)
-
-        def choose():
-            folder = filedialog.askdirectory(
-                title="Choose quotation save folder",
-                initialdir=path_var.get() if os.path.isdir(path_var.get()) else APP_DIR,
-                parent=win
-            )
-            if folder:
-                folder = os.path.normpath(os.path.abspath(folder))
-                os.makedirs(folder, exist_ok=True)
-                path_var.set(folder)
-                entry.delete(0, "end")
-                entry.insert(0, folder)
-                status_var.set("Selected folder: " + folder)
-
-        ttk.Button(row, text="Browse...", command=choose).pack(side="left", padx=(8, 0))
+        path_entry = ttk.Entry(path_row, textvariable=path_var)
+        path_entry.pack(side="left", fill="x", expand=True)
         status_var = tk.StringVar(value="Current save folder: " + get_pdf_dir())
-        ttk.Label(win, textvariable=status_var, foreground=GREY, wraplength=700).pack(anchor="w", padx=18, pady=8)
+        def choose():
+            folder = filedialog.askdirectory(title="Choose quotation save folder", initialdir=path_var.get() if os.path.isdir(path_var.get()) else APP_DIR, parent=win)
+            if folder:
+                path_var.set(os.path.normpath(os.path.abspath(folder)))
+                status_var.set("Selected folder: " + path_var.get())
+        ttk.Button(path_row, text="Browse...", command=choose).pack(side="left", padx=(8,0))
+        ttk.Label(body, textvariable=status_var, foreground=GREY, wraplength=820).pack(anchor="w", pady=6)
 
-        ttk.Separator(win).pack(fill="x", padx=18, pady=8)
-        ttk.Label(win, text="Manage Users", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(4, 8))
-        user_frame = ttk.Frame(win)
-        user_frame.pack(fill="x", padx=18)
+        ttk.Separator(body).pack(fill="x", pady=10)
+        ttk.Label(body, text="Manage Users", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2,8))
+        user_frame = ttk.Frame(body); user_frame.pack(fill="x")
         user_list = tk.Listbox(user_frame, height=6)
         user_list.pack(side="left", fill="x", expand=True)
-        for _, name in get_users():
-            user_list.insert("end", name)
-
+        for _, name in get_users(): user_list.insert("end", name)
         def refresh_users():
-            user_list.delete(0, "end")
-            for _, name in get_users():
-                user_list.insert("end", name)
-
+            user_list.delete(0,"end")
+            for _, name in get_users(): user_list.insert("end", name)
         def add_user():
-            name = simpledialog.askstring("Add User", "User name:", parent=win)
+            name=simpledialog.askstring("Add User","User name:",parent=win)
             if name and name.strip():
                 try:
-                    c = db(); c.execute("INSERT INTO users(name,active) VALUES(?,1)", (name.strip(),)); c.commit(); c.close()
-                    refresh_users()
-                    status_var.set("User added: " + name.strip())
-                    self.refresh_prepared_users()
+                    c=db(); c.execute("INSERT INTO users(name,active) VALUES(?,1)",(name.strip(),)); c.commit(); c.close()
+                    refresh_users(); self.refresh_prepared_users()
                 except sqlite3.IntegrityError:
-                    messagebox.showwarning("Users", "That user already exists.", parent=win)
-
+                    messagebox.showwarning("Users","That user already exists.",parent=win)
         def delete_user():
-            sel = user_list.curselection()
-            if not sel:
-                messagebox.showwarning("Users", "Select a user first.", parent=win); return
-            name = user_list.get(sel[0])
-            if name == self.prepared_by.get():
-                messagebox.showwarning("Users", "Select another Prepared By user before deleting this user.", parent=win); return
-            c = db(); c.execute("UPDATE users SET active=0 WHERE name=?", (name,)); c.commit(); c.close()
-            refresh_users(); self.refresh_prepared_users()
+            sel=user_list.curselection()
+            if not sel: messagebox.showwarning("Users","Select a user first.",parent=win); return
+            name=user_list.get(sel[0])
+            if name==self.prepared_by.get(): messagebox.showwarning("Users","Select another Prepared By user before deleting this user.",parent=win); return
+            c=db(); c.execute("UPDATE users SET active=0 WHERE name=?",(name,)); c.commit(); c.close(); refresh_users(); self.refresh_prepared_users()
+        ub=ttk.Frame(body); ub.pack(pady=6)
+        ttk.Button(ub,text="ADD USER",command=add_user).pack(side="left",padx=4)
+        ttk.Button(ub,text="DELETE USER",command=delete_user).pack(side="left",padx=4)
 
-        ub = ttk.Frame(win); ub.pack(pady=6)
-        ttk.Button(ub, text="ADD USER", command=add_user).pack(side="left", padx=4)
-        ttk.Button(ub, text="DELETE USER", command=delete_user).pack(side="left", padx=4)
+        ttk.Separator(body).pack(fill="x", pady=10)
+        ttk.Label(body, text="COD Settings", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2,8))
+        cod=ttk.Frame(body); cod.pack(fill="x")
+        first_var=tk.StringVar(value=get_setting("cod_first_kg","450")); add_var=tk.StringVar(value=get_setting("cod_additional_kg","100")); comm_var=tk.StringVar(value=get_setting("cod_commission","2.5")); min_var=tk.StringVar(value=get_setting("cod_min_amount","20000"))
+        for i,(label,var) in enumerate([("1st KG Charge",first_var),("Additional KG Charge",add_var),("COD Commission %",comm_var),("Commission Minimum Amount",min_var)]):
+            ttk.Label(cod,text=label).grid(row=0,column=i,padx=5,sticky="w")
+            ttk.Entry(cod,textvariable=var,width=20).grid(row=1,column=i,padx=5,sticky="ew")
 
-        ttk.Separator(win).pack(fill="x", padx=18, pady=8)
-        ttk.Label(win, text="COD Settings", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(4, 8))
-        cod = ttk.Frame(win); cod.pack(fill="x", padx=18)
-        first_var = tk.StringVar(value=get_setting("cod_first_kg", "450"))
-        add_var = tk.StringVar(value=get_setting("cod_additional_kg", "100"))
-        comm_var = tk.StringVar(value=get_setting("cod_commission", "2.5"))
-        min_var = tk.StringVar(value=get_setting("cod_min_amount", "20000"))
-        for i, (label, var) in enumerate([("1st KG Charge", first_var), ("Additional KG Charge", add_var), ("COD Commission %", comm_var), ("Commission Minimum Amount", min_var)]):
-            ttk.Label(cod, text=label).grid(row=0, column=i, padx=5, sticky="w")
-            ttk.Entry(cod, textvariable=var, width=18).grid(row=1, column=i, padx=5, sticky="ew")
-        ttk.Label(win, text="COD is calculated internally only; it is not shown on customer PDFs.", foreground=GREY).pack(anchor="w", padx=18, pady=8)
+        ttk.Separator(body).pack(fill="x", pady=10)
+        ttk.Label(body, text="INVOICE SETTINGS", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(2,8))
 
-        ttk.Separator(win).pack(fill="x", padx=18, pady=8)
-        ttk.Label(win, text="Invoice Settings", font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=18, pady=(4, 6))
-        invset = ttk.Frame(win); invset.pack(fill="x", padx=18)
-        ttk.Label(invset, text="Warranty Conditions").grid(row=0, column=0, sticky="nw", padx=(0,8))
-        warranty_text = tk.Text(invset, height=4, width=72, wrap="word")
-        warranty_text.grid(row=0, column=1, sticky="ew")
-        warranty_text.insert("1.0", get_setting("invoice_warranty_conditions", ""))
-        ttk.Label(invset, text="Payment Methods (one per line)").grid(row=1, column=0, sticky="nw", padx=(0,8), pady=(8,0))
-        payment_text = tk.Text(invset, height=5, width=72, wrap="none")
-        payment_text.grid(row=1, column=1, sticky="ew", pady=(8,0))
-        payment_text.insert("1.0", get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT"))
-        invset.columnconfigure(1, weight=1)
+        inv=ttk.Frame(body); inv.pack(fill="x")
+        ttk.Label(inv,text="Warranty Conditions",font=("Segoe UI",9,"bold")).grid(row=0,column=0,sticky="nw",padx=(0,10))
+        warranty_text=tk.Text(inv,height=7,width=78,wrap="word")
+        warranty_text.grid(row=0,column=1,sticky="ew")
+        warranty_text.insert("1.0",get_setting("invoice_warranty_conditions",""))
+        ttk.Label(inv,text="These conditions will appear at the bottom of every invoice.",foreground=GREY).grid(row=1,column=1,sticky="w",pady=(3,10))
+        inv.columnconfigure(1,weight=1)
 
-        buttons = ttk.Frame(win); buttons.pack(pady=10)
+        ttk.Label(inv,text="Payment Methods",font=("Segoe UI",9,"bold")).grid(row=2,column=0,sticky="nw",padx=(0,10),pady=(4,0))
+        pm_frame=ttk.Frame(inv); pm_frame.grid(row=2,column=1,sticky="ew",pady=(4,0)); pm_frame.columnconfigure(0,weight=1)
+        payment_list=tk.Listbox(pm_frame,height=7)
+        payment_list.grid(row=0,column=0,sticky="ew")
+        saved_methods=[x.strip() for x in get_setting("invoice_payment_methods","CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()]
+        for m in saved_methods: payment_list.insert("end",m)
+        pm_entry=ttk.Entry(pm_frame); pm_entry.grid(row=1,column=0,sticky="ew",pady=(6,0))
+        def add_payment():
+            value=pm_entry.get().strip()
+            if not value: return
+            existing=[payment_list.get(i).strip().lower() for i in range(payment_list.size())]
+            if value.lower() in existing:
+                messagebox.showwarning("Payment Methods","This payment method already exists.",parent=win); return
+            payment_list.insert("end",value.upper()); pm_entry.delete(0,"end")
+        def delete_payment():
+            sel=payment_list.curselection()
+            if sel: payment_list.delete(sel[0])
+            else: messagebox.showwarning("Payment Methods","Select a payment method first.",parent=win)
+        pm_buttons=ttk.Frame(pm_frame); pm_buttons.grid(row=2,column=0,sticky="w",pady=6)
+        ttk.Button(pm_buttons,text="ADD",command=add_payment).pack(side="left",padx=(0,5))
+        ttk.Button(pm_buttons,text="DELETE",command=delete_payment).pack(side="left")
+
+        ttk.Label(inv,text="Default Unit Price",font=("Segoe UI",9,"bold")).grid(row=3,column=0,sticky="w",padx=(0,10),pady=(8,0))
+        unit_default=tk.BooleanVar(value=get_setting("invoice_show_unit_price","1")=="1")
+        unit_btn=tk.Button(inv,text="ON" if unit_default.get() else "OFF",width=8,font=("Segoe UI",9,"bold"),relief="flat",cursor="hand2")
+        unit_btn.grid(row=3,column=1,sticky="w",pady=(8,0))
+        def toggle_default_unit():
+            unit_default.set(not unit_default.get()); unit_btn.config(text="ON" if unit_default.get() else "OFF")
+        unit_btn.config(command=toggle_default_unit)
+        ttk.Label(inv,text="This is the default state when a new invoice window opens.",foreground=GREY).grid(row=4,column=1,sticky="w")
+
+        buttons=ttk.Frame(body); buttons.pack(fill="x",pady=16)
         def save():
             try:
-                if self.num(first_var.get()) < 0 or self.num(add_var.get()) < 0 or self.num(comm_var.get()) < 0 or self.num(min_var.get()) < 0:
-                    raise ValueError("COD values cannot be negative.")
-                selected_folder = os.path.normpath(os.path.abspath(path_var.get().strip()))
-                if not selected_folder:
-                    raise ValueError("Please choose a PDF save folder.")
-                os.makedirs(selected_folder, exist_ok=True)
-                set_pdf_dir(selected_folder)
-                set_setting("cod_first_kg", self.num(first_var.get()))
-                set_setting("cod_additional_kg", self.num(add_var.get()))
-                set_setting("cod_commission", self.num(comm_var.get()))
-                set_setting("cod_min_amount", self.num(min_var.get()))
-                set_setting("invoice_warranty_conditions", warranty_text.get("1.0", "end-1c").strip())
-                methods = [x.strip() for x in payment_text.get("1.0", "end-1c").splitlines() if x.strip()]
-                if not methods:
-                    raise ValueError("Add at least one payment method.")
-                set_setting("invoice_payment_methods", "\n".join(methods))
-                self.recalc()
-                self.refresh_prepared_users()
-                messagebox.showinfo("Settings", "Settings saved.", parent=win)
-                win.destroy()
-            except Exception as e:
-                messagebox.showerror("Settings", f"Could not save settings:\n{e}", parent=win)
-        ttk.Button(buttons, text="SAVE", command=save).pack(side="left", padx=5)
-        ttk.Button(buttons, text="CANCEL", command=win.destroy).pack(side="left", padx=5)
+                if any(self.num(v.get())<0 for v in (first_var,add_var,comm_var,min_var)): raise ValueError("COD values cannot be negative.")
+                folder=os.path.normpath(os.path.abspath(path_var.get().strip()))
+                if not folder: raise ValueError("Please choose a PDF save folder.")
+                os.makedirs(folder,exist_ok=True); set_pdf_dir(folder)
+                set_setting("cod_first_kg",self.num(first_var.get())); set_setting("cod_additional_kg",self.num(add_var.get())); set_setting("cod_commission",self.num(comm_var.get())); set_setting("cod_min_amount",self.num(min_var.get()))
+                set_setting("invoice_warranty_conditions",warranty_text.get("1.0","end-1c").strip())
+                methods=[payment_list.get(i).strip() for i in range(payment_list.size()) if payment_list.get(i).strip()]
+                if not methods: raise ValueError("Add at least one payment method.")
+                set_setting("invoice_payment_methods","\n".join(methods))
+                set_setting("invoice_show_unit_price","1" if unit_default.get() else "0")
+                self.recalc(); self.refresh_prepared_users()
+                canvas.unbind_all("<MouseWheel>")
+                messagebox.showinfo("Settings","Settings saved successfully.",parent=win); win.destroy()
+            except Exception as e: messagebox.showerror("Settings",f"Could not save settings:\n{e}",parent=win)
+        ttk.Button(buttons,text="SAVE SETTINGS",style="Blue.TButton",command=save).pack(side="right",padx=5)
+        ttk.Button(buttons,text="CLOSE",command=lambda:(canvas.unbind_all("<MouseWheel>"),win.destroy())).pack(side="right",padx=5)
 
     def refresh_prepared_users(self):
         if not hasattr(self, "prepared_combo"):
