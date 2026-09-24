@@ -569,7 +569,7 @@ class App:
         num_lbl.grid(row=r + 1, column=0, padx=2, pady=2, sticky="nsew")
 
         for j, var in enumerate([p, d, q, c], start=1):
-            justify = "center" if j == 2 else ("right" if j == 4 else "left")
+            justify = "center" if j in (2, 3) else ("right" if j == 4 else "left")
             # Product name is intentionally bold for quick visual scanning.
             entry_font = ("Segoe UI", 9, "bold") if j == 1 else ("Segoe UI", 9)
             e = tk.Entry(self.table, textvariable=var, justify=justify,
@@ -648,6 +648,12 @@ class App:
             self.weight_entry.selection_range(0, tk.END)
         return "break"
 
+    def focus_profit_entry(self):
+        if getattr(self, "profit_entry", None) is not None:
+            self.profit_entry.focus_set()
+            self.profit_entry.selection_range(0, tk.END)
+        return "break"
+
     def num(self, x):
         try:
             return float(str(x).replace(",", "").replace("LKR", "").strip() or 0)
@@ -661,6 +667,18 @@ class App:
             cost += qty * self.num(c.get())
 
         profit = self.num(self.profit.get())
+        if profit <= 0:
+            self.total_cost.set(money(cost))
+            self.final90.set("")
+            self.final180.set("")
+            self.cod_charge.set("")
+            self.cod_commission.set("")
+            self.pre_deposit_cod.set("")
+            self.cod_subtotal_3m.set("")
+            self.cod_subtotal_6m.set("")
+            self.cod_final_3m.set("")
+            self.cod_final_6m.set("")
+            return
         final90 = cost + profit
         final180 = final90 * 1.35
 
