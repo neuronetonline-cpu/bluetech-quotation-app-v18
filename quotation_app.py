@@ -1399,7 +1399,7 @@ class App:
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
         ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 17, "bold")).pack(side="left")
-        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 10, "bold")).pack(side="right")
+        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 10)).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
@@ -1451,6 +1451,7 @@ class App:
         payment_box = ttk.LabelFrame(body, text="Payment Breakdown", padding=6)
         payment_box.pack(fill="x", padx=4, pady=4)
         payment_rows = []
+        invoice_total_payment_var = tk.StringVar(value="LKR 0.00")
         payment_total_var = tk.StringVar(value="LKR 0.00")
         def add_payment_row(method=None, amount="0"):
             row = ttk.Frame(payment_box)
@@ -1470,6 +1471,9 @@ class App:
             total = sum(max(0, self.num(a.get())) for _, a in payment_rows)
             payment_total_var.set(money(total))
         ttk.Button(payment_box, text="+ ADD PAYMENT", command=add_payment_row).pack(anchor="w", pady=(0,4))
+        payment_invoice_summary = ttk.Frame(payment_box); payment_invoice_summary.pack(fill="x", pady=(0,2))
+        ttk.Label(payment_invoice_summary, text="Invoice Total:", font=("Segoe UI",10,"bold")).pack(side="left")
+        ttk.Label(payment_invoice_summary, textvariable=invoice_total_payment_var, font=("Segoe UI",10,"bold")).pack(side="left", padx=8)
         payment_summary = ttk.Frame(payment_box); payment_summary.pack(fill="x")
         ttk.Label(payment_summary, text="Payments Total:", font=("Segoe UI",10,"bold")).pack(side="left")
         ttk.Label(payment_summary, textvariable=payment_total_var, font=("Segoe UI",10,"bold")).pack(side="left", padx=8)
@@ -1483,7 +1487,6 @@ class App:
         sc_qv = tk.StringVar(value="1")
         sc_uv = tk.StringVar(value=str(max(0, self.num(self.service_charger.get()))))
         sc_av = tk.StringVar(value="LKR 0.00")
-        total_var = tk.StringVar(value="LKR 0.00")
 
         def calc_invoice(*_):
             total = 0.0
@@ -1495,6 +1498,7 @@ class App:
             total += sc_amount
             sc_av.set(money(sc_amount))
             total_var.set(money(total))
+            invoice_total_payment_var.set(money(total))
 
         def rebuild_table():
             for w in box.winfo_children():
@@ -1580,12 +1584,10 @@ class App:
             txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
             txt("077 633 7942 / 074 394 6233",False,8); ln()
             txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
-            txt(f"SOLD BY    : {self.prepared_by.get()}",True,9)
-            txt(f"CUSTOMER   : {customer.get()}")
+            txt(f"SOLD BY    : {self.prepared_by.get()}",False,9)
+            txt(f"CUSTOMER   : {customer.get()}",True,9)
             txt(f"PHONE      : {phone.get()}")
             if invoice_title.get().strip(): txt(f"TITLE      : {invoice_title.get().strip()}")
-            txt("PAYMENT BREAKDOWN:",True,8)
-            for pm, pa in payment_lines(): txt(f"  {pm:<22} {money(pa):>15}",False,8)
             ln()
             rows=invoice_data(); show=show_unit_price.get()
             if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,8)
@@ -1594,9 +1596,14 @@ class App:
             total=0
             for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                 total+=amt
-                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,7.5)
-                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,7.5)
-            ln(); txt(f"TOTAL : {total:,.2f}",True,10); txt("PAYMENT TOTAL : " + money(sum(pa for _, pa in payment_lines())),True,8)
+                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,8)
+                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,8)
+            ln(); txt(f"TOTAL : {total:,.2f}",True,10)
+            ln(); txt("PAYMENT BREAKDOWN",True,9)
+            txt(f"INVOICE TOTAL : {money(total)}",True,8)
+            for pm, pa in payment_lines(): txt(f"  {pm:<22} {money(pa):>15}",False,8)
+            txt("PAYMENT TOTAL : " + money(sum(pa for _, pa in payment_lines())),True,8)
+            ln()
             y-=2*mm; txt("WARRANTY CONDITIONS",True,9); ln()
             cond=get_setting("invoice_warranty_conditions","").replace("\\n","\n")
             for part in cond.splitlines() or [""]:
@@ -1626,11 +1633,8 @@ class App:
                 def line(s=""): lines.append(str(s)[:95])
                 line("BLUETECH COMPUTERS"); line("COMPUTER SALES | REPAIRS | UPGRADES")
                 line("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama"); line("077 633 7942 / 074 394 6233"); line("="*80)
-                line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"SOLD BY    : {self.prepared_by.get()}"); line(f"CUSTOMER   : {customer.get()[:65]}"); line(f"PHONE      : {phone.get()[:65]}")
+                line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"SOLD BY    : {self.prepared_by.get()}"); line(""); line(f"CUSTOMER   : {customer.get()[:65]}") ; line(f"PHONE      : {phone.get()[:65]}")
                 if invoice_title.get().strip(): line(f"TITLE      : {invoice_title.get()[:65]}")
-                line("PAYMENT BREAKDOWN:")
-                for pm, pa in payment_lines(): line(f"  {pm:<22} {money(pa):>15}")
-                line("-"*80)
                 rows=invoice_data(); total=0
                 if show_unit_price.get(): line(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}")
                 else: line(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}")
@@ -1639,7 +1643,9 @@ class App:
                     total+=amt
                     if show_unit_price.get(): line(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}")
                     else: line(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}")
-                line("-"*80); line(f"TOTAL : {total:,.2f}"); line(f"PAYMENT TOTAL : {money(sum(pa for _, pa in payment_lines()))}"); line("="*80)
+                line("-"*80); line(f"TOTAL : {total:,.2f}"); line("PAYMENT BREAKDOWN:"); line(f"INVOICE TOTAL : {money(total)}");
+                for pm, pa in payment_lines(): line(f"  {pm:<22} {money(pa):>15}");
+                line(f"PAYMENT TOTAL : {money(sum(pa for _, pa in payment_lines()))}"); line("="*80)
                 line("WARRANTY CONDITIONS")
                 for part in get_setting("invoice_warranty_conditions","").replace("\\n","\n").splitlines(): line(part)
                 line("Thank you for your business!")
