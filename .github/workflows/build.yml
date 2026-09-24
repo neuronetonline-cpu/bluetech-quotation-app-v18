@@ -31,5 +31,5 @@ jobs:
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: BluetechJobChit-Windows
+          name: BluetechQuotation-Windows
           path: dist/BluetechQuotation.exe
