@@ -649,6 +649,9 @@ class App:
             elif j == 3:
                 # Quantity greater than 1 is visually emphasized.
                 e.bind("<KeyRelease>", lambda event, var=q, widget=e: self._qty_keyrelease(var, widget))
+            elif j == 4:
+                # Recalculate immediately while COST is being entered.
+                e.bind("<KeyRelease>", lambda event: self.recalc())
             if j == 2:
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 1, 3))
             elif j == 3:
@@ -1913,7 +1916,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
-        self.invoice_title.set(q[10] or "")
+        self.quotation_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -1951,7 +1954,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
-        self.invoice_title.set(q[10] or "")
+        self.quotation_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -1987,7 +1990,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
-        self.invoice_title.set(q[10] or "")
+        self.quotation_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
@@ -2024,7 +2027,7 @@ class App:
         self.profit.set(str(q[5] or 0))
         self.weight.set(str(q[8]) if q[8] else "")
         self.prepared_by.set(q[9] or self.prepared_by.get())
-        self.invoice_title.set(q[10] or "")
+        self.quotation_title.set(q[10] or "")
         self.refresh_prepared_users()
 
         for row in self.rows:
