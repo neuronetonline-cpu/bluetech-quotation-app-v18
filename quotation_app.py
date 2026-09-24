@@ -523,7 +523,7 @@ class App:
             return
         # 16 standard rows fit in the quotation-items area. Extra rows use the
         # table's internal scrollbar. This height is deliberately constant.
-        table_height = 460
+        table_height = 500
         try:
             self.table_body.configure(height=table_height)
             self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
