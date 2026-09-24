@@ -282,6 +282,7 @@ class App:
         # scrollbar on the far right of the application window.
         main_area = tk.Frame(self.root, bg="#F3F7FC")
         main_area.pack(fill="both", expand=True)
+        self.main_area = main_area
 
         self.page_canvas = tk.Canvas(main_area, bg="#F3F7FC", highlightthickness=0, bd=0)
         self.page_scroll = ttk.Scrollbar(main_area, orient="vertical", command=self.page_canvas.yview)
@@ -597,21 +598,19 @@ class App:
         self.recalc()
 
     def _page_mousewheel(self, event):
-        """Scroll the complete quotation page when the pointer is over it."""
+        """Scroll the complete quotation page when the pointer is over the main content area."""
         try:
-            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
-            widget = self.root.winfo_containing(x, y)
-            if widget is None:
-                return
-            w = widget
-            while w is not None:
-                if w == self.page_canvas:
-                    self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
-                    return "break"
-                try:
-                    w = w.master
-                except Exception:
-                    break
+            x_root = self.root.winfo_pointerx()
+            y_root = self.root.winfo_pointery()
+
+            x1 = self.main_area.winfo_rootx()
+            y1 = self.main_area.winfo_rooty()
+            x2 = x1 + self.main_area.winfo_width()
+            y2 = y1 + self.main_area.winfo_height()
+
+            if x1 <= x_root <= x2 and y1 <= y_root <= y2:
+                self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
+                return "break"
         except Exception:
             pass
 
