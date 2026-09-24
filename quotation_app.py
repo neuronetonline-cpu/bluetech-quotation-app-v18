@@ -114,6 +114,8 @@ def db():
     qcols = {r[1] for r in c.execute("PRAGMA table_info(quotations)").fetchall()}
     if "prepared_by" not in qcols:
         c.execute("ALTER TABLE quotations ADD COLUMN prepared_by TEXT DEFAULT ''")
+    if "title" not in qcols:
+        c.execute("ALTER TABLE quotations ADD COLUMN title TEXT DEFAULT ''")
     defaults = {
         "cod_first_kg": "450",
         "cod_additional_kg": "100",
@@ -304,6 +306,7 @@ class App:
         self.customer = tk.StringVar()
         self.phone = tk.StringVar()
         self.qdate = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
+        self.title = tk.StringVar()
         users = [name for _, name in get_users()]
         if not users:
             c = db(); c.execute("INSERT OR IGNORE INTO users(name,active) VALUES(?,1)", ("Admin",)); c.commit(); c.close()
@@ -326,54 +329,62 @@ class App:
                                            values=users, state="readonly")
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
 
-        # ---------- Quotation workspace ----------
-        workspace = tk.Frame(page_parent, bg="#F3F7FC")
-        workspace.pack(fill="x", padx=12, pady=(0, 0))
-        workspace.columnconfigure(0, weight=7)
-        workspace.columnconfigure(1, weight=3)
+        tk.Label(info, text="TITLE", bg="#FFFFFF", fg="#506176",
+                 font=("Segoe UI", 8, "bold")).grid(row=2, column=2, sticky="w", padx=7, pady=(3, 0))
+        ttk.Entry(info, textvariable=self.title).grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
 
-        # ---------- Items section (left) ----------
-        items_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        items_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        items_bar = tk.Frame(items_panel, bg="#0878D1", height=34)
-        items_bar.pack(fill="x")
-        items_bar.pack_propagate(False)
-        tk.Label(items_bar, text="QUOTATION ITEMS", bg="#0878D1", fg="white",
-                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
-        tk.Label(items_bar, text="•  COST AND PROFIT ARE INTERNAL ONLY", bg="#0878D1", fg="#DCEFFF",
-                 font=("Segoe UI", 8)).pack(side="left", padx=4)
+        # ---------- Items section ----------
+        section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY")
+        box = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        # The product table grows automatically to show the standard 16 rows.
+        # Extra rows are kept inside the table scrollbar instead of making the
+        # whole quotation page unnecessarily tall.
+        box.pack(fill="x", padx=12)
+        self.product_box = box
 
-        table = tk.Frame(items_panel, bg="#FFFFFF")
-        table.pack(fill="x", padx=5, pady=5)
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
-        weights = [0, 2, 6, 1, 2, 0]
-        mins = [36, 170, 360, 70, 130, 68]
+        weights = [0, 3, 5, 1, 2, 0]
         for j, (h, wt) in enumerate(zip(heads, weights)):
-            table.columnconfigure(j, weight=wt, minsize=mins[j])
-            tk.Label(table, text=h, bg="#CFE6FA", fg="#12345B",
+            box.columnconfigure(j, weight=wt, minsize=[42, 210, 360, 100, 180, 70][j])
+            tk.Label(box, text=h, bg="#CFE6FA", fg="#12345B",
                      font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
-                     padx=5, pady=5).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
-        self.table = table
+                     padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
+
+        body = tk.Frame(box, bg="#FFFFFF")
+        body.grid(row=1, column=0, columnspan=6, sticky="ew")
+        body.grid_propagate(False)
+        self.table_body = body
+        box.rowconfigure(1, weight=0)
+
+        self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
+        self.table_scroll = ttk.Scrollbar(body, orient="vertical", command=self.table_canvas.yview)
+        self.table = tk.Frame(self.table_canvas, bg="#FFFFFF")
+        self.table_window = self.table_canvas.create_window((0, 0), window=self.table, anchor="nw")
+        self.table_canvas.configure(yscrollcommand=self.table_scroll.set)
+        self.table_canvas.pack(side="left", fill="both", expand=True)
+        self.table_scroll.pack(side="right", fill="y")
+
+        def on_table_configure(_event=None):
+            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+        def on_canvas_configure(event):
+            self.table_canvas.itemconfigure(self.table_window, width=event.width)
+        self.table.bind("<Configure>", on_table_configure)
+        self.table_canvas.bind("<Configure>", on_canvas_configure)
+        self.table_canvas.bind_all("<MouseWheel>", self._table_mousewheel, add="+")
+
         self.rows = []
         for p in DEFAULT_PRODUCTS:
             self.add_row(p, silent=True)
+        self.update_product_table_height()
 
-        addbar = tk.Frame(items_panel, bg="#F3F7FC")
-        addbar.pack(fill="x", padx=5, pady=(0, 5))
+        addbar = tk.Frame(page_parent, bg="#F3F7FC")
+        addbar.pack(fill="x", padx=12, pady=(4, 2))
         ttk.Button(addbar, text="＋  ADD PRODUCT / ROW", style="Blue.TButton",
                    command=lambda: self.add_row("")).pack(side="left")
-        tk.Label(addbar, text="Scroll the main quotation page when adding more rows.",
+        tk.Label(addbar, text="Scroll inside the product list when adding more rows.",
                  bg="#F3F7FC", fg="#667085", font=("Segoe UI", 8)).pack(side="left", padx=12)
 
-        # ---------- Internal calculation (right) ----------
-        calc_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        calc_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        calc_bar = tk.Frame(calc_panel, bg="#0878D1", height=34)
-        calc_bar.pack(fill="x")
-        calc_bar.pack_propagate(False)
-        tk.Label(calc_bar, text="INTERNAL CALCULATION", bg="#0878D1", fg="white",
-                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
-
+        # ---------- Internal calculation ----------
         self.total_cost = tk.StringVar(value="LKR 0.00")
         self.profit = tk.StringVar(value="0")
         self.final90 = tk.StringVar(value="LKR 0.00")
@@ -382,15 +393,17 @@ class App:
         self.cod_charge = tk.StringVar(value="LKR 0.00")
         self.cod_subtotal = tk.StringVar(value="LKR 0.00")
         self.cod_commission = tk.StringVar(value="LKR 0.00")
-        self.predeposit_cod = tk.StringVar(value="LKR 0.00")
+        self.pre_deposit_cod = tk.StringVar(value="LKR 0.00")
         self.cod_final = tk.StringVar(value="LKR 0.00")
         self.cod_final_6m = tk.StringVar(value="LKR 0.00")
 
-        calc_body = tk.Frame(calc_panel, bg="#FFFFFF", padx=7, pady=7)
-        calc_body.pack(fill="both", expand=True)
-        calc_body.columnconfigure(1, weight=1)
+        section("INTERNAL CALCULATION")
+        calc = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1, padx=7, pady=7)
+        calc.pack(fill="x", padx=12)
 
-        calc_fields = [
+        # Each calculation value is a normal editable Entry on the right side
+        # of a fixed-size row. Calculated fields are refreshed by CALCULATE.
+        labels = [
             ("3 Months Final Price", self.final90, True),
             ("6 Months Final Price (+35%)", self.final180, False),
             ("Total Cost", self.total_cost, False),
@@ -398,28 +411,37 @@ class App:
             ("Weight (KG)", self.weight, False),
             ("COD Charge", self.cod_charge, False),
             ("COD Commission", self.cod_commission, False),
-            ("Pre Deposit COD Amount", self.predeposit_cod, False),
+            ("Pre Deposit COD Amount", self.pre_deposit_cod, False),
             ("COD Subtotal", self.cod_subtotal, False),
             ("Final COD Price (3 month)", self.cod_final, False),
             ("Final COD Price (6 month)", self.cod_final_6m, False),
         ]
-        for i, (lab, var, highlight) in enumerate(calc_fields):
-            bg = BLUE if highlight else "#F7FAFE"
-            fg = "white" if highlight else "#17324D"
-            card = tk.Frame(calc_body, bg=bg, highlightbackground=(BLUE if highlight else "#D4E2F0"),
-                            highlightthickness=1, height=36)
-            card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=3)
-            card.grid_propagate(False)
-            tk.Label(card, text=lab, bg=bg, fg=fg, anchor="w",
-                     font=("Segoe UI", 8, "bold")).pack(side="left", padx=12)
-            tk.Label(card, textvariable=var, bg=bg, fg=fg, anchor="e",
-                     font=("Segoe UI", 10 if highlight else 9, "bold")).pack(side="right", fill="x", expand=True, padx=12)
+        for i, (lab, var, is_final_3m) in enumerate(labels):
+            calc.columnconfigure(0, weight=1)
+            card_bg = BLUE if is_final_3m else "#F7FAFE"
+            card_border = BLUE if is_final_3m else "#D4E2F0"
+            card = tk.Frame(calc, bg=card_bg, highlightbackground=card_border, highlightthickness=1,
+                            padx=8, pady=4)
+            card.grid(row=i, column=0, sticky="ew", padx=1, pady=3)
+            card.columnconfigure(1, weight=1)
+            tk.Label(card, text=lab, bg=card_bg, fg=("white" if is_final_3m else "#12345B"),
+                     font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(2, 8))
+            if is_final_3m:
+                ent = tk.Entry(card, textvariable=var, justify="right",
+                               font=("Segoe UI", 11, "bold"), bg=BLUE, fg="white",
+                               insertbackground="white", relief="flat", bd=0,
+                               highlightthickness=0)
+            else:
+                ent = ttk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"))
+            ent.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+            if lab in ("Requested Profit", "Weight (KG)"):
+                ent.bind("<KeyRelease>", lambda e: self.recalc())
 
-        calc_btn = tk.Button(calc_panel, text="CALCULATE", command=self.recalc,
+        calc_btn = tk.Button(calc, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
-                             relief="flat", padx=15, pady=10, cursor="hand2")
-        calc_btn.pack(fill="x", padx=7, pady=(0, 7))
+                             relief="flat", padx=15, pady=12, cursor="hand2")
+        calc_btn.grid(row=len(labels), column=0, padx=1, pady=(7, 0), sticky="ew")
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
@@ -446,6 +468,10 @@ class App:
                 return
             w = widget
             while w is not None:
+                # Let the quotation-items scrollbar handle mouse-wheel events
+                # while the pointer is inside the product table.
+                if w in (getattr(self, "table_canvas", None), getattr(self, "table_scroll", None)):
+                    return
                 if w == self.page_canvas:
                     self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
                     return "break"
@@ -457,9 +483,71 @@ class App:
             pass
 
     def _table_mousewheel(self, event):
-        # The quotation items are now part of the main page; the outer page
-        # scrollbar handles vertical scrolling.
-        return None
+        # Scroll only when the pointer is over the quotation-items area.
+        try:
+            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+            widget = self.root.winfo_containing(x, y)
+            if widget is not None:
+                w = widget
+                inside = False
+                while w is not None:
+                    if w == self.table_canvas:
+                        inside = True
+                        break
+                    try:
+                        w = w.master
+                    except Exception:
+                        break
+                if inside:
+                    self.table_canvas.yview_scroll(int(-event.delta / 120), "units")
+        except Exception:
+            pass
+
+    def update_product_table_height(self):
+        """Auto-size the quotation item area for the standard product list.
+
+        The normal 16-row product list is shown without an inner scrollbar on
+        a normal full-screen desktop window. If additional rows are added, or
+        the screen is smaller, the table is capped and its own scrollbar is
+        used.
+        """
+        if not hasattr(self, "table_body") or not hasattr(self, "rows"):
+            return
+
+        # One compact row is approximately 31px high with the current Entry
+        # padding/borders.  Keep all standard 16 products visible in a normal
+        # maximized desktop window.  The main page scrollbar can then handle
+        # the lower calculation/action area when necessary.
+        row_height = 31
+        desired_height = (len(self.rows) * row_height) + 6
+
+        try:
+            screen_height = self.root.winfo_screenheight()
+        except Exception:
+            screen_height = 900
+
+        # 16 standard rows need about 502px.  Allow that height even on a
+        # 768px-tall display; the outer quotation scrollbar will handle the
+        # rest of the page.  Extra rows are still limited and use the inner
+        # product scrollbar.
+        max_height = max(502, min(560, screen_height - 250))
+        table_height = min(desired_height, max_height)
+
+        self.table_body.configure(height=table_height)
+        self.table_body.update_idletasks()
+        self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+
+        # Hide the internal scrollbar when all rows fit; show it only when
+        # the table content is taller than the available table area.
+        content_bbox = self.table_canvas.bbox("all")
+        content_height = (content_bbox[3] - content_bbox[1]) if content_bbox else 0
+        if content_height > table_height + 2:
+            if not self.table_scroll.winfo_ismapped():
+                self.table_scroll.pack(side="right", fill="y")
+        else:
+            if self.table_scroll.winfo_ismapped():
+                self.table_scroll.pack_forget()
+            self.table_canvas.yview_moveto(0)
 
     def add_row(self, product="", silent=False):
         r = len(self.rows)
@@ -488,6 +576,8 @@ class App:
             e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 1))
+            elif j == 3:
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 2))
             elif j == 4:
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 3))
 
@@ -498,7 +588,13 @@ class App:
                         relief="solid", bd=1, cursor="hand2")
         btn.grid(row=r, column=5, padx=2, pady=2, sticky="nsew")
         self.rows.append((p, d, q, c, widgets, btn, num_lbl))
+        for col in range(6):
+            self.table.columnconfigure(col, weight=(0 if col in (0, 5) else 1), minsize=40)
 
+        if hasattr(self, "table_canvas"):
+            self.table_canvas.update_idletasks()
+            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+            self.update_product_table_height()
         if not silent:
             self.recalc()
 
@@ -536,6 +632,10 @@ class App:
                 w.configure(bg=row_bg)
                 w.grid_configure(row=r, column=j)
             row[5].grid_configure(row=r, column=5)
+        if hasattr(self, "table_canvas"):
+            self.table_canvas.update_idletasks()
+            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+            self.update_product_table_height()
         self.recalc()
 
     def num(self, x):
@@ -567,9 +667,9 @@ class App:
             cod_charge = first_kg + extra_kg * additional_kg
         cod_subtotal = final90 + cod_charge
         cod_commission = cod_subtotal * commission_pct / 100.0 if cod_subtotal > commission_min else 0
-        predeposit_cod = cod_charge + cod_commission
+        pre_deposit_cod = cod_charge + cod_commission
         cod_final = cod_subtotal + cod_commission
-        cod_final_6m = final180 + predeposit_cod
+        cod_final_6m = final180 + pre_deposit_cod
 
         self.total_cost.set(money(cost))
         self.final90.set(money(final90))
@@ -577,7 +677,7 @@ class App:
         self.cod_charge.set(money(cod_charge))
         self.cod_subtotal.set(money(cod_subtotal))
         self.cod_commission.set(money(cod_commission))
-        self.predeposit_cod.set(money(predeposit_cod))
+        self.pre_deposit_cod.set(money(pre_deposit_cod))
         self.cod_final.set(money(cod_final))
         self.cod_final_6m.set(money(cod_final_6m))
 
@@ -630,14 +730,15 @@ class App:
             self.num(self.final180.get()),
             self.num(self.weight.get()),
             self.prepared_by.get().strip(),
-            datetime.now().isoformat()
+            datetime.now().isoformat(),
+            self.title.get().strip()
         )
 
         if self.editing_id is not None:
             c.execute(
                 """UPDATE quotations
                    SET qno=?,customer=?,phone=?,date=?,profit=?,
-                       warranty90=?,warranty180=?,weight=?,prepared_by=?,created_at=?
+                       warranty90=?,warranty180=?,weight=?,prepared_by=?,created_at=?,title=?
                    WHERE id=?""",
                 values + (self.editing_id,)
             )
@@ -647,8 +748,8 @@ class App:
         else:
             c.execute(
                 """INSERT INTO quotations
-                   (qno,customer,phone,date,profit,warranty90,warranty180,weight,prepared_by,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                   (qno,customer,phone,date,profit,warranty90,warranty180,weight,prepared_by,created_at,title)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 values
             )
             qid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -768,6 +869,7 @@ class App:
         customer_name = self.customer.get().strip() or "-"
         qinfo = Paragraph(
             f"<b>Quotation No</b> : {self.qno.get()}<br/>"
+            f"<b>Title</b> : {self.title.get().strip() or '-'}<br/>"
             f"<b>Date</b> : {self.qdate.get()}<br/>"
             f"<b>Customer</b> : <font name='Helvetica-Bold'>{customer_name}</font><br/>"
             f"<b>Phone / WhatsApp</b> : {self.phone.get()}<br/>"
@@ -1311,19 +1413,19 @@ class App:
         search_entry.pack(side="left", fill="x", expand=True)
         ttk.Label(
             search_row,
-            text="Name / Quotation No. / Phone / Date"
+            text="Title / Name / Quotation No. / Phone / Date"
         ).pack(side="left", padx=10)
 
         tree = ttk.Treeview(
             win,
-            columns=("q", "customer", "phone", "date", "profit", "p90", "p180"),
+            columns=("q", "title", "customer", "phone", "date", "profit", "p90", "p180"),
             show="headings"
         )
         headings = (
-            "Quotation No.", "Customer", "Phone", "Date",
+            "Quotation No.", "Title", "Customer", "Phone", "Date",
             "Requested Profit", "3 Months", "6 Months"
         )
-        widths = (155, 190, 135, 105, 135, 135, 135)
+        widths = (145, 210, 180, 130, 105, 135, 135, 135)
 
         for col, h, width in zip(tree["columns"], headings, widths):
             tree.heading(col, text=h)
@@ -1333,7 +1435,7 @@ class App:
 
         c = db()
         rows = c.execute(
-            """SELECT id,qno,customer,phone,date,profit,warranty90,warranty180,prepared_by
+            """SELECT id,qno,customer,phone,date,profit,warranty90,warranty180,prepared_by,title
                FROM quotations ORDER BY id DESC"""
         ).fetchall()
         c.close()
@@ -1344,9 +1446,9 @@ class App:
                 tree.delete(item)
 
             for row in rows:
-                qid, qno, customer, phone, date, profit, p90, p180, prepared_by = row
+                qid, qno, customer, phone, date, profit, p90, p180, prepared_by, title = row
                 hay = " ".join([
-                    str(qno or ""), str(customer or ""),
+                    str(qno or ""), str(title or ""), str(customer or ""),
                     str(phone or ""), str(date or "")
                 ]).lower()
 
@@ -1356,7 +1458,7 @@ class App:
                 tree.insert(
                     "", "end", iid=str(qid),
                     values=(
-                        qno, customer, phone, date,
+                        qno, title, customer, phone, date,
                         money(profit), money(p90), money(p180)
                     )
                 )
@@ -1407,7 +1509,7 @@ class App:
         c = db()
         q = c.execute(
             """SELECT id,qno,customer,phone,date,profit,
-                      warranty90,warranty180,weight,prepared_by
+                      warranty90,warranty180,weight,prepared_by,title
                FROM quotations WHERE id=?""",
             (qid,)
         ).fetchone()
@@ -1434,6 +1536,7 @@ class App:
         q, items = record
         self.editing_id = q[0]
         self.qno.set(q[1])
+        self.title.set(q[10] or "")
         self.customer.set(q[2])
         self.phone.set(q[3])
         self.qdate.set(q[4])
@@ -1471,6 +1574,7 @@ class App:
         # Load selected quotation into the editor, but deliberately detach it from the old DB id.
         self.editing_id = None
         self.qno.set(next_qno())
+        self.title.set(q[10] or "")
         self.customer.set(q[2] or "")
         self.phone.set(q[3] or "")
         self.qdate.set(datetime.now().strftime("%Y-%m-%d"))
@@ -1506,6 +1610,7 @@ class App:
 
         self.editing_id = q[0]
         self.qno.set(q[1])
+        self.title.set(q[10] or "")
         self.customer.set(q[2])
         self.phone.set(q[3])
         self.qdate.set(q[4])
@@ -1542,6 +1647,7 @@ class App:
 
         self.editing_id = q[0]
         self.qno.set(q[1])
+        self.title.set(q[10] or "")
         self.customer.set(q[2])
         self.phone.set(q[3])
         self.qdate.set(q[4])
