@@ -122,10 +122,24 @@ def db():
         "cod_commission": "2.5",
         "cod_min_amount": "20000",
         "service_charger": "1500",
-        "show_predeposit_cod_quotation": "1",
+        "show_predeposit_cod_quotation": "0",
     }
     for key, value in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (key, value))
+
+    # First launch after the toggle redesign: force the new toggle to OFF once.
+    # After that, the user's ON/OFF choice is remembered normally.
+    initialized = c.execute(
+        "SELECT value FROM settings WHERE key='predeposit_toggle_v9_initialized'"
+    ).fetchone()
+    if not initialized:
+        c.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES('show_predeposit_cod_quotation','0')"
+        )
+        c.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES('predeposit_toggle_v9_initialized','1')"
+        )
+
     c.commit()
     return c
 
@@ -313,7 +327,7 @@ class App:
             c = db(); c.execute("INSERT OR IGNORE INTO users(name,active) VALUES(?,1)", ("Admin",)); c.commit(); c.close()
             users = ["Admin"]
         self.prepared_by = tk.StringVar(value=users[0])
-        self.invoice_title = tk.StringVar()
+        self.quotation_title = tk.StringVar()
         self.show_predeposit_cod = tk.BooleanVar(value=get_setting("show_predeposit_cod_quotation", "0") == "1")
 
         fields = [("Quotation No.", self.qno), ("Customer Name", self.customer),
@@ -342,9 +356,9 @@ class App:
         # Quotation Title appears directly below Customer Name and is searchable in history.
         tk.Label(info, text="QUOTATION TITLE", bg="#FFFFFF", fg="#506176",
                  font=("Segoe UI", 8, "bold")).grid(row=2, column=2, sticky="w", padx=7, pady=(3, 0))
-        self.invoice_title_entry = ttk.Entry(info, textvariable=self.invoice_title)
-        self.invoice_title_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
-        self.invoice_title_entry.bind("<Return>", lambda event: self.focus_first_description())
+        self.quotation_title_entry = ttk.Entry(info, textvariable=self.quotation_title)
+        self.quotation_title_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
+        self.quotation_title_entry.bind("<Return>", lambda event: self.focus_first_description())
 
         # ---------- Quotation workspace ----------
         # The quotation table and internal calculation panel share the same
@@ -427,7 +441,6 @@ class App:
             ("3 Months Final Price", self.final90, False, True),
             ("6 Months Final Price (+35%)", self.final180, False, False),
             ("Weight (KG)", self.weight, True, False),
-            ("Service Charger", self.service_charger, True, False),
             ("COD Charge", self.cod_charge, False, False),
             ("COD Commission", self.cod_commission, False, False),
             ("Pre Deposit COD Amount", self.pre_deposit_cod, False, False),
@@ -438,14 +451,10 @@ class App:
         ]
 
         # Build the calculation panel in the requested groups.
-        section_positions = {2, 12, 14}
         for i, (lab, var, editable, is_final_3m) in enumerate(labels):
             if i == 2:
                 sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
                 sep.grid(row=i, column=0, columnspan=2, sticky="ew", pady=(5, 5))
-                row_offset = 1
-            else:
-                row_offset = 0
 
             row = i + (1 if i >= 2 else 0)
             card_bg = BLUE if is_final_3m else ("#FFF8E8" if lab == "Pre Deposit COD Amount" else "#FFFFFF")
@@ -469,17 +478,7 @@ class App:
                                highlightcolor="#0878D1")
                 ent.grid(row=0, column=1, sticky="ew")
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
-                if lab == "Requested Profit":
-                    self.profit_entry = ent
-                    ent.bind("<Return>", lambda event: self.focus_service_charger_entry())
-                elif lab == "Service Charger":
-                    self.service_charger_entry = ent
-                    ent.bind("<KeyRelease>", lambda event: (
-                        set_setting("service_charger", self.service_charger.get()),
-                        self.recalc()
-                    ))
-                    ent.bind("<Return>", lambda event: self.focus_weight_entry())
-                elif lab == "Weight (KG)":
+                if lab == "Weight (KG)":
                     self.weight_entry = ent
             else:
                 ent = tk.Entry(card, textvariable=var, justify="right",
@@ -500,16 +499,45 @@ class App:
                              relief="flat", padx=15, pady=10, cursor="hand2")
         calc_btn.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=2)
 
-        self.predeposit_check = ttk.Checkbutton(
-            calc_body,
-            text="Show Pre Deposit COD Amount on Quotation PDF",
-            variable=self.show_predeposit_cod,
-            command=lambda: set_setting("show_predeposit_cod_quotation", "1" if self.show_predeposit_cod.get() else "0")
+        # Bluetech-style ON/OFF toggle for Pre Deposit COD.
+        # Default state is OFF and the state is remembered in settings.
+        toggle_row = calc_row + 1
+        toggle_wrap = tk.Frame(calc_body, bg="#FFFFFF", height=34)
+        toggle_wrap.grid(row=toggle_row, column=0, columnspan=2, sticky="ew", pady=(6, 2))
+        toggle_wrap.grid_propagate(False)
+        toggle_wrap.columnconfigure(0, weight=1)
+
+        self.predeposit_label = tk.Label(
+            toggle_wrap,
+            text="PRE DEPOSIT COD",
+            bg="#FFFFFF",
+            fg="#17324D",
+            font=("Segoe UI", 8, "bold"),
+            anchor="w"
         )
-        self.predeposit_check.grid(row=calc_row + 1, column=0, columnspan=2, sticky="w", pady=(5, 2))
+        self.predeposit_label.grid(row=0, column=0, sticky="w", padx=(2, 8))
+
+        self.predeposit_toggle = tk.Button(
+            toggle_wrap,
+            text="OFF",
+            command=self.toggle_predeposit_cod,
+            font=("Segoe UI", 8, "bold"),
+            width=6,
+            height=1,
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+            padx=8,
+            pady=3
+        )
+        self.predeposit_toggle.grid(row=0, column=1, sticky="e", padx=(0, 2))
+        self.update_predeposit_toggle()
+        self.predeposit_check = self.predeposit_toggle  # compatibility alias
 
         # Final section: Total Cost and Requested Profit.
-        calc_row += 1
+        # Move to a NEW grid row after the Calculate button + toggle so the
+        # separator never overlaps either widget.
+        calc_row += 2
         sep = tk.Frame(calc_body, bg="#D7E5F2", height=1)
         sep.grid(row=calc_row, column=0, columnspan=2, sticky="ew", pady=(6, 5))
         calc_row += 1
@@ -532,8 +560,16 @@ class App:
                                highlightbackground="#C8D6E5", highlightcolor="#0878D1")
                 ent.grid(row=0, column=1, sticky="ew")
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
-                self.profit_entry = ent
-                ent.bind("<Return>", lambda event: self.focus_weight_entry())
+                if lab == "Requested Profit":
+                    self.profit_entry = ent
+                    ent.bind("<Return>", lambda event: self.focus_service_charger_entry())
+                elif lab == "Service Charger":
+                    self.service_charger_entry = ent
+                    ent.bind("<KeyRelease>", lambda event: (
+                        set_setting("service_charger", self.service_charger.get()),
+                        self.recalc()
+                    ))
+                    ent.bind("<Return>", lambda event: self.focus_weight_entry())
             else:
                 ent = tk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"),
                                bg="#FFFFFF", fg="#17324D", relief="flat", bd=0,
@@ -576,25 +612,9 @@ class App:
             pass
 
     def _table_mousewheel(self, event):
-        # Scroll only when the pointer is over the quotation-items area.
-        try:
-            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
-            widget = self.root.winfo_containing(x, y)
-            if widget is not None:
-                w = widget
-                inside = False
-                while w is not None:
-                    if w == self.table_canvas:
-                        inside = True
-                        break
-                    try:
-                        w = w.master
-                    except Exception:
-                        break
-                if inside:
-                    self.table_canvas.yview_scroll(int(-event.delta / 120), "units")
-        except Exception:
-            pass
+        # The quotation table is not a separate canvas.
+        # Use the main quotation page scrolling instead.
+        return self._page_mousewheel(event)
 
     def add_row(self, product="", silent=False):
         r = len(self.rows)
@@ -683,6 +703,34 @@ class App:
             widget.icursor(tk.END)
         self.recalc()
 
+    def toggle_predeposit_cod(self):
+        self.show_predeposit_cod.set(not self.show_predeposit_cod.get())
+        set_setting(
+            "show_predeposit_cod_quotation",
+            "1" if self.show_predeposit_cod.get() else "0"
+        )
+        self.update_predeposit_toggle()
+
+    def update_predeposit_toggle(self):
+        if not hasattr(self, "predeposit_toggle"):
+            return
+        if self.show_predeposit_cod.get():
+            self.predeposit_toggle.configure(
+                text="ON",
+                bg="#0878D1",
+                fg="white",
+                activebackground="#0565B3",
+                activeforeground="white"
+            )
+        else:
+            self.predeposit_toggle.configure(
+                text="OFF",
+                bg="#E7EEF5",
+                fg="#667085",
+                activebackground="#D7E4F0",
+                activeforeground="#17324D"
+            )
+
     def focus_info_entry(self, name):
         entry = getattr(self, "info_entries", {}).get(name)
         if entry is not None:
@@ -695,7 +743,7 @@ class App:
         return "break"
 
     def focus_quotation_title(self):
-        self.invoice_title_entry.focus_set()
+        self.quotation_title_entry.focus_set()
         return "break"
 
     def focus_first_description(self):
@@ -919,7 +967,7 @@ class App:
             self.num(self.final180.get()),
             self.num(self.weight.get()),
             self.prepared_by.get().strip(),
-            self.invoice_title.get().strip(),
+            self.quotation_title.get().strip(),
             datetime.now().isoformat()
         )
 
@@ -1061,7 +1109,7 @@ class App:
             f"<b>Date</b> : {self.qdate.get()}<br/>"
             f"<b>Customer</b> : <font name='Helvetica-Bold'>{customer_name}</font><br/>"
             f"<b>Phone / WhatsApp</b> : {self.phone.get()}<br/>"
-            f"<b>Quotation Title</b> : {self.invoice_title.get() or '-'}<br/>"
+            f"<b>Quotation Title</b> : {self.quotation_title.get() or '-'}<br/>"
             f"<font size='7.5'>Prepared By : {self.prepared_by.get()}</font>",
             info_style
         )
@@ -1080,10 +1128,10 @@ class App:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(qtitle)
-        if self.invoice_title.get().strip():
+        if self.quotation_title.get().strip():
             story.append(Spacer(1, 4))
             story.append(Paragraph(
-                f"<b>{self.invoice_title.get().strip()}</b>",
+                f"<b>{self.quotation_title.get().strip()}</b>",
                 ParagraphStyle("quotation_title_text", parent=normal, fontSize=11,
                                leading=13, textColor=colors.HexColor(BLUE))
             ))
@@ -1355,7 +1403,7 @@ class App:
         invoice_date = tk.StringVar(value=datetime.now().strftime("%Y-%m-%d"))
         customer = tk.StringVar(value=self.customer.get().strip())
         phone = tk.StringVar(value=self.phone.get().strip())
-        invoice_title = tk.StringVar(value=self.invoice_title.get().strip())
+        invoice_title = tk.StringVar(value=self.quotation_title.get().strip())
         fields = [
             ("Invoice No.", invoice_no), ("Customer Name", customer),
             ("WhatsApp / Phone", phone), ("Date", invoice_date)
