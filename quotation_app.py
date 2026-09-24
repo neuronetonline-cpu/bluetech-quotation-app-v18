@@ -1051,7 +1051,7 @@ class App:
             textColor=colors.HexColor(DARK_BLUE), alignment=TA_LEFT
         )
         small = ParagraphStyle(
-            "small", parent=styles["BodyText"], fontSize=7.5, leading=9.5,
+            "small", parent=styles["BodyText"], fontSize=8, leading=10.5,
             textColor=colors.HexColor(GREY)
         )
         normal = ParagraphStyle(
@@ -1146,7 +1146,7 @@ class App:
         story.append(Paragraph(
             "BUILD YOUR IDEAL PC WITH US",
             ParagraphStyle(
-                "tag", parent=subtitle, fontSize=7.5, leading=9,
+                "tag", parent=subtitle, fontSize=8, leading=10,
                 textColor=colors.HexColor(BLUE)
             )
         ))
@@ -1227,7 +1227,7 @@ class App:
         )
         price90_style = ParagraphStyle(
             "price90", parent=styles["BodyText"],
-            fontName="Helvetica-Bold", fontSize=15, leading=17,
+            fontName="Helvetica-Bold", fontSize=9.5, leading=11,
             textColor=colors.white, alignment=TA_CENTER
         )
         price180_style = ParagraphStyle(
@@ -1410,7 +1410,7 @@ class App:
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
         ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 30, "bold")).pack(side="left")
-        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 15)).pack(side="right")
+        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 12)).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
