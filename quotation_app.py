@@ -312,19 +312,26 @@ class App:
 
         fields = [("Quotation No.", self.qno), ("Customer Name", self.customer),
                   ("WhatsApp / Phone", self.phone), ("Date", self.qdate)]
+        self.info_entries = {}
         for i, (lab, var) in enumerate(fields):
             col = i * 2
             info.columnconfigure(col + 1, weight=1)
             tk.Label(info, text=lab.upper(), bg="#FFFFFF", fg="#506176",
                      font=("Segoe UI", 8, "bold")).grid(row=0, column=col, sticky="w", padx=7)
-            ttk.Entry(info, textvariable=var).grid(row=1, column=col, columnspan=2,
-                                                    sticky="ew", padx=7, pady=(3, 4))
+            entry = ttk.Entry(info, textvariable=var)
+            entry.grid(row=1, column=col, columnspan=2, sticky="ew", padx=7, pady=(3, 4))
+            self.info_entries[lab] = entry
+
+        # Enter navigation: Customer -> WhatsApp -> Prepared By -> first Description.
+        self.info_entries["Customer Name"].bind("<Return>", lambda event: self.focus_info_entry("WhatsApp / Phone"))
+        self.info_entries["WhatsApp / Phone"].bind("<Return>", lambda event: self.focus_prepared_entry())
 
         tk.Label(info, text="PREPARED BY", bg="#FFFFFF", fg="#506176",
                  font=("Segoe UI", 8, "bold")).grid(row=2, column=0, sticky="w", padx=7, pady=(3, 0))
         self.prepared_combo = ttk.Combobox(info, textvariable=self.prepared_by,
                                            values=users, state="readonly")
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
+        self.prepared_combo.bind("<Return>", lambda event: self.focus_first_description())
 
         # ---------- Quotation workspace ----------
         # The quotation table and internal calculation panel share the same
@@ -583,20 +590,20 @@ class App:
             if j == 1:
                 # Main product names are always shown in CAPITAL letters.
                 e.bind("<KeyRelease>", lambda event, var=p, widget=e: self._product_keyrelease(var, widget))
+            elif j == 2:
+                # DESCRIPTION is always shown in CAPITAL letters.
+                e.bind("<KeyRelease>", lambda event, var=d, widget=e: self._description_keyrelease(var, widget))
             elif j == 3:
                 # Quantity greater than 1 is visually emphasized.
                 e.bind("<KeyRelease>", lambda event, var=q, widget=e: self._qty_keyrelease(var, widget))
             else:
                 e.bind("<KeyRelease>", lambda e: self.recalc())
             if j == 2:
-                # DESCRIPTION -> same field in the next row
-                e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 1))
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 1, 3))
             elif j == 3:
-                # QTY -> same field in the next row
-                e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 2))
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_profit(widget, 2))
             elif j == 4:
-                # COST -> same field in the next row
-                e.bind("<Return>", lambda event, widget=e: self.focus_next_row_field(widget, 3))
+                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_profit(widget, 3))
 
         btn = tk.Button(self.table, text="✕", width=4,
                         command=lambda rr=r: self.remove_row(rr),
@@ -630,6 +637,65 @@ class App:
             qty = 0
         widget.configure(font=("Segoe UI", 9, "bold") if qty > 1 else ("Segoe UI", 9))
         self.recalc()
+
+    def _description_keyrelease(self, var, widget):
+        value = var.get()
+        upper = value.upper()
+        if value != upper:
+            var.set(upper)
+            widget.icursor(tk.END)
+        self.recalc()
+
+    def focus_info_entry(self, name):
+        entry = getattr(self, "info_entries", {}).get(name)
+        if entry is not None:
+            entry.focus_set()
+            entry.selection_range(0, tk.END)
+        return "break"
+
+    def focus_prepared_entry(self):
+        self.prepared_combo.focus_set()
+        return "break"
+
+    def focus_first_description(self):
+        if self.rows:
+            self.rows[0][4][1].focus_set()
+            self.rows[0][4][1].selection_range(0, tk.END)
+        return "break"
+
+    def focus_next_or_cost(self, widget, column, target_column):
+        current_idx = None
+        for idx, row in enumerate(self.rows):
+            if widget in row[4]:
+                current_idx = idx
+                break
+        if current_idx is None:
+            return "break"
+        next_idx = current_idx + 1
+        if next_idx < len(self.rows):
+            self.rows[next_idx][4][column].focus_set()
+            self.rows[next_idx][4][column].selection_range(0, tk.END)
+        elif self.rows:
+            self.rows[0][4][target_column].focus_set()
+            self.rows[0][4][target_column].selection_range(0, tk.END)
+        return "break"
+
+    def focus_next_or_profit(self, widget, column):
+        current_idx = None
+        for idx, row in enumerate(self.rows):
+            if widget in row[4]:
+                current_idx = idx
+                break
+        if current_idx is None:
+            return "break"
+        next_idx = current_idx + 1
+        if next_idx < len(self.rows):
+            self.rows[next_idx][4][column].focus_set()
+            self.rows[next_idx][4][column].selection_range(0, tk.END)
+        elif getattr(self, "profit_entry", None) is not None:
+            self.profit_entry.focus_set()
+            self.profit_entry.selection_range(0, tk.END)
+        return "break"
 
     def focus_next_row_field(self, widget, column):
         """Move Enter-key focus to the same field in the next visible row."""
