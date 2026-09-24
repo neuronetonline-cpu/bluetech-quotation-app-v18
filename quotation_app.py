@@ -338,44 +338,37 @@ class App:
 
         # ---------- Items section ----------
         section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY")
-        box = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        # The product table grows automatically to show the standard 16 rows.
-        # Extra rows are kept inside the table scrollbar instead of making the
-        # whole quotation page unnecessarily tall.
-        box.pack(fill="x", padx=12)
-        self.product_box = box
+
+        # Product rows are part of the main quotation page.
+        # There is no separate table box or inner scrollbar; the main page
+        # scrollbar moves the quotation items together with the rest of the form.
+        table_area = tk.Frame(page_parent, bg="#F3F7FC")
+        table_area.pack(fill="x", padx=12)
 
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
         weights = [0, 3, 5, 1, 2, 0]
+        min_sizes = [42, 210, 360, 100, 180, 70]
+
         for j, (h, wt) in enumerate(zip(heads, weights)):
-            box.columnconfigure(j, weight=wt, minsize=[42, 210, 360, 100, 180, 70][j])
-            tk.Label(box, text=h, bg="#CFE6FA", fg="#12345B",
-                     font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
-                     padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
+            table_area.columnconfigure(j, weight=wt, minsize=min_sizes[j])
+            tk.Label(
+                table_area, text=h, bg="#CFE6FA", fg="#12345B",
+                font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
+                padx=5, pady=7
+            ).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
 
-        body = tk.Frame(box, bg="#FFFFFF")
-        body.grid(row=1, column=0, columnspan=6, sticky="ew")
-        body.grid_propagate(False)
-        self.table_body = body
-        box.rowconfigure(1, weight=0)
-
-        self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
-        self.table = tk.Frame(self.table_canvas, bg="#FFFFFF")
-        self.table_window = self.table_canvas.create_window((0, 0), window=self.table, anchor="nw")
-        self.table_canvas.pack(side="left", fill="both", expand=True)
-
-        def on_table_configure(_event=None):
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
-        def on_canvas_configure(event):
-            self.table_canvas.itemconfigure(self.table_window, width=event.width)
-        self.table.bind("<Configure>", on_table_configure)
-        self.table_canvas.bind("<Configure>", on_canvas_configure)
-        self.table_canvas.bind_all("<MouseWheel>", self._table_mousewheel, add="+")
+        self.table = tk.Frame(table_area, bg="#FFFFFF")
+        self.table.grid(row=1, column=0, columnspan=6, sticky="ew")
+        self.table.grid_columnconfigure(0, weight=0)
+        self.table.grid_columnconfigure(1, weight=3)
+        self.table.grid_columnconfigure(2, weight=5)
+        self.table.grid_columnconfigure(3, weight=1)
+        self.table.grid_columnconfigure(4, weight=2)
+        self.table.grid_columnconfigure(5, weight=0)
 
         self.rows = []
         for p in DEFAULT_PRODUCTS:
             self.add_row(p, silent=True)
-        self.update_product_table_height()
 
         addbar = tk.Frame(page_parent, bg="#F3F7FC")
         addbar.pack(fill="x", padx=12, pady=(4, 2))
@@ -447,65 +440,10 @@ class App:
         self.recalc()
 
     def _page_mousewheel(self, event):
-        """Scroll the complete quotation page when the pointer is over it."""
+        """Scroll the main quotation page."""
         try:
-            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
-            widget = self.root.winfo_containing(x, y)
-            if widget is None:
-                return
-            w = widget
-            while w is not None:
-                # Let the quotation-items scrollbar handle mouse-wheel events
-                # while the pointer is inside the product table.
-                if w == getattr(self, "table_canvas", None):
-                    return
-                if w == self.page_canvas:
-                    self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
-                    return "break"
-                try:
-                    w = w.master
-                except Exception:
-                    break
-        except Exception:
-            pass
-
-    def _table_mousewheel(self, event):
-        # Scroll only when the pointer is over the quotation-items area.
-        try:
-            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
-            widget = self.root.winfo_containing(x, y)
-            if widget is not None:
-                w = widget
-                inside = False
-                while w is not None:
-                    if w == self.table_canvas:
-                        inside = True
-                        break
-                    try:
-                        w = w.master
-                    except Exception:
-                        break
-                if inside:
-                    self.table_canvas.yview_scroll(int(-event.delta / 120), "units")
-        except Exception:
-            pass
-
-    def update_product_table_height(self):
-        """Keep the quotation-items viewport at a fixed height.
-
-        The product table itself has its own scrollbar. The complete quotation
-        page uses the outer scrollbar for the calculation and action sections.
-        No window-size calculation is performed here, so this method cannot
-        participate in a geometry feedback loop.
-        """
-        if not hasattr(self, "table_body"):
-            return
-        # 16 standard rows fit in the quotation-items area. Extra rows use the
-        # table's internal scrollbar. This height is deliberately constant.
-        table_height = 460
-        try:
-            self.table_body.configure(height=table_height)
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+            self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
+            return "break"
         except Exception:
             pass
 
@@ -551,9 +489,6 @@ class App:
         for col in range(6):
             self.table.columnconfigure(col, weight=(0 if col in (0, 5) else 1), minsize=40)
 
-        if hasattr(self, "table_canvas"):
-            self.table_canvas.update_idletasks()
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
         if not silent:
             self.recalc()
 
@@ -591,9 +526,6 @@ class App:
                 w.configure(bg=row_bg)
                 w.grid_configure(row=r, column=j)
             row[5].grid_configure(row=r, column=5)
-        if hasattr(self, "table_canvas"):
-            self.table_canvas.update_idletasks()
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
         self.recalc()
 
     def num(self, x):
