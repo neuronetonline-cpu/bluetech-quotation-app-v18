@@ -327,19 +327,14 @@ class App:
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
 
         # ---------- Quotation workspace ----------
-        # The quotation table and internal calculation panel share the same
-        # horizontal workspace. The table uses the full available width of its
-        # left panel; there is no second/inner scrollbar.
         workspace = tk.Frame(page_parent, bg="#F3F7FC")
-        workspace.pack(fill="x", padx=12, pady=(8, 0))
-        workspace.columnconfigure(0, weight=74)
-        workspace.columnconfigure(1, weight=26)
-        workspace.rowconfigure(0, weight=1)
+        workspace.pack(fill="x", padx=12, pady=(0, 0))
+        workspace.columnconfigure(0, weight=7)
+        workspace.columnconfigure(1, weight=3)
 
-        # ---------- Quotation items ----------
+        # ---------- Items section (left) ----------
         items_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
         items_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-
         items_bar = tk.Frame(items_panel, bg="#0878D1", height=34)
         items_bar.pack(fill="x")
         items_bar.pack_propagate(False)
@@ -348,33 +343,37 @@ class App:
         tk.Label(items_bar, text="•  COST AND PROFIT ARE INTERNAL ONLY", bg="#0878D1", fg="#DCEFFF",
                  font=("Segoe UI", 8)).pack(side="left", padx=4)
 
-        self.table = tk.Frame(items_panel, bg="#FFFFFF")
-        self.table.pack(fill="x", padx=5, pady=(5, 0))
-
-        # # small | PRODUCT medium | DESCRIPTION largest | QTY small |
-        # COST small/medium | REMOVE small. These proportions stretch to
-        # the complete width of the left panel.
+        table = tk.Frame(items_panel, bg="#FFFFFF")
+        table.pack(fill="x", padx=5, pady=5)
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
-        for j, h in enumerate(heads):
-            weight = [0, 20, 52, 8, 14, 0][j]
-            minsize = [36, 150, 260, 70, 110, 70][j]
-            self.table.columnconfigure(j, weight=weight, minsize=minsize)
-            tk.Label(self.table, text=h, bg="#CFE6FA", fg="#12345B",
+        weights = [0, 2, 6, 1, 2, 0]
+        mins = [36, 170, 360, 70, 130, 68]
+        for j, (h, wt) in enumerate(zip(heads, weights)):
+            table.columnconfigure(j, weight=wt, minsize=mins[j])
+            tk.Label(table, text=h, bg="#CFE6FA", fg="#12345B",
                      font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
-                     padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
-
+                     padx=5, pady=5).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
+        self.table = table
         self.rows = []
         for p in DEFAULT_PRODUCTS:
             self.add_row(p, silent=True)
 
         addbar = tk.Frame(items_panel, bg="#F3F7FC")
-        addbar.pack(fill="x", padx=5, pady=(5, 6))
+        addbar.pack(fill="x", padx=5, pady=(0, 5))
         ttk.Button(addbar, text="＋  ADD PRODUCT / ROW", style="Blue.TButton",
                    command=lambda: self.add_row("")).pack(side="left")
         tk.Label(addbar, text="Scroll the main quotation page when adding more rows.",
                  bg="#F3F7FC", fg="#667085", font=("Segoe UI", 8)).pack(side="left", padx=12)
 
-        # ---------- Internal calculation ----------
+        # ---------- Internal calculation (right) ----------
+        calc_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        calc_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        calc_bar = tk.Frame(calc_panel, bg="#0878D1", height=34)
+        calc_bar.pack(fill="x")
+        calc_bar.pack_propagate(False)
+        tk.Label(calc_bar, text="INTERNAL CALCULATION", bg="#0878D1", fg="white",
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
+
         self.total_cost = tk.StringVar(value="LKR 0.00")
         self.profit = tk.StringVar(value="0")
         self.final90 = tk.StringVar(value="LKR 0.00")
@@ -383,23 +382,15 @@ class App:
         self.cod_charge = tk.StringVar(value="LKR 0.00")
         self.cod_subtotal = tk.StringVar(value="LKR 0.00")
         self.cod_commission = tk.StringVar(value="LKR 0.00")
+        self.predeposit_cod = tk.StringVar(value="LKR 0.00")
         self.cod_final = tk.StringVar(value="LKR 0.00")
+        self.cod_final_6m = tk.StringVar(value="LKR 0.00")
 
-        calc_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        calc_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        calc_bar = tk.Frame(calc_panel, bg="#0878D1", height=34)
-        calc_bar.pack(fill="x")
-        calc_bar.pack_propagate(False)
-        tk.Label(calc_bar, text="INTERNAL CALCULATION", bg="#0878D1", fg="white",
-                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
-
-        calc_body = tk.Frame(calc_panel, bg="#FFFFFF", padx=8, pady=8)
+        calc_body = tk.Frame(calc_panel, bg="#FFFFFF", padx=7, pady=7)
         calc_body.pack(fill="both", expand=True)
-        calc_body.columnconfigure(0, weight=1)
         calc_body.columnconfigure(1, weight=1)
 
-        labels = [
+        calc_fields = [
             ("3 Months Final Price", self.final90, True),
             ("6 Months Final Price (+35%)", self.final180, False),
             ("Total Cost", self.total_cost, False),
@@ -407,38 +398,28 @@ class App:
             ("Weight (KG)", self.weight, False),
             ("COD Charge", self.cod_charge, False),
             ("COD Commission", self.cod_commission, False),
+            ("Pre Deposit COD Amount", self.predeposit_cod, False),
             ("COD Subtotal", self.cod_subtotal, False),
-            ("Final COD Price", self.cod_final, False),
+            ("Final COD Price (3 month)", self.cod_final, False),
+            ("Final COD Price (6 month)", self.cod_final_6m, False),
         ]
+        for i, (lab, var, highlight) in enumerate(calc_fields):
+            bg = BLUE if highlight else "#F7FAFE"
+            fg = "white" if highlight else "#17324D"
+            card = tk.Frame(calc_body, bg=bg, highlightbackground=(BLUE if highlight else "#D4E2F0"),
+                            highlightthickness=1, height=36)
+            card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=3)
+            card.grid_propagate(False)
+            tk.Label(card, text=lab, bg=bg, fg=fg, anchor="w",
+                     font=("Segoe UI", 8, "bold")).pack(side="left", padx=12)
+            tk.Label(card, textvariable=var, bg=bg, fg=fg, anchor="e",
+                     font=("Segoe UI", 10 if highlight else 9, "bold")).pack(side="right", fill="x", expand=True, padx=12)
 
-        for i, (lab, var, is_final_3m) in enumerate(labels):
-            card_bg = BLUE if is_final_3m else "#F7FAFE"
-            card_border = BLUE if is_final_3m else "#D4E2F0"
-            card = tk.Frame(calc_body, bg=card_bg, highlightbackground=card_border,
-                            highlightthickness=1, padx=8, pady=6)
-            card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=2)
-            card.columnconfigure(1, weight=1)
-            tk.Label(card, text=lab, bg=card_bg,
-                     fg=("white" if is_final_3m else "#17324D"),
-                     font=("Segoe UI", 8 if is_final_3m else 8, "bold"),
-                     anchor="w").grid(row=0, column=0, sticky="w", padx=(2, 8))
-            if is_final_3m:
-                ent = tk.Entry(card, textvariable=var, justify="right",
-                               font=("Segoe UI", 12, "bold"), bg=BLUE, fg="white",
-                               insertbackground="white", relief="flat", bd=0,
-                               highlightthickness=0)
-            else:
-                ent = ttk.Entry(card, textvariable=var, justify="right",
-                                font=("Segoe UI", 9, "bold"))
-            ent.grid(row=0, column=1, sticky="ew")
-            if lab in ("Requested Profit", "Weight (KG)"):
-                ent.bind("<KeyRelease>", lambda e: self.recalc())
-
-        calc_btn = tk.Button(calc_body, text="CALCULATE", command=self.recalc,
+        calc_btn = tk.Button(calc_panel, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
                              relief="flat", padx=15, pady=10, cursor="hand2")
-        calc_btn.grid(row=len(labels), column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        calc_btn.pack(fill="x", padx=7, pady=(0, 7))
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
@@ -476,25 +457,9 @@ class App:
             pass
 
     def _table_mousewheel(self, event):
-        # Scroll only when the pointer is over the quotation-items area.
-        try:
-            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
-            widget = self.root.winfo_containing(x, y)
-            if widget is not None:
-                w = widget
-                inside = False
-                while w is not None:
-                    if w == self.table_canvas:
-                        inside = True
-                        break
-                    try:
-                        w = w.master
-                    except Exception:
-                        break
-                if inside:
-                    self.table_canvas.yview_scroll(int(-event.delta / 120), "units")
-        except Exception:
-            pass
+        # The quotation items are now part of the main page; the outer page
+        # scrollbar handles vertical scrolling.
+        return None
 
     def add_row(self, product="", silent=False):
         r = len(self.rows)
@@ -533,12 +498,7 @@ class App:
                         relief="solid", bd=1, cursor="hand2")
         btn.grid(row=r, column=5, padx=2, pady=2, sticky="nsew")
         self.rows.append((p, d, q, c, widgets, btn, num_lbl))
-        # Keep the hand-drawn layout proportions: narrow # / Qty / Cost / Remove,
-        # medium Product, and the widest Description column.
-        for col, (weight, minsize) in enumerate(zip(
-                [0, 20, 52, 8, 14, 0],
-                [36, 150, 260, 70, 110, 70])):
-            self.table.columnconfigure(col, weight=weight, minsize=minsize)
+
         if not silent:
             self.recalc()
 
@@ -607,7 +567,9 @@ class App:
             cod_charge = first_kg + extra_kg * additional_kg
         cod_subtotal = final90 + cod_charge
         cod_commission = cod_subtotal * commission_pct / 100.0 if cod_subtotal > commission_min else 0
+        predeposit_cod = cod_charge + cod_commission
         cod_final = cod_subtotal + cod_commission
+        cod_final_6m = final180 + predeposit_cod
 
         self.total_cost.set(money(cost))
         self.final90.set(money(final90))
@@ -615,7 +577,9 @@ class App:
         self.cod_charge.set(money(cod_charge))
         self.cod_subtotal.set(money(cod_subtotal))
         self.cod_commission.set(money(cod_commission))
+        self.predeposit_cod.set(money(predeposit_cod))
         self.cod_final.set(money(cod_final))
+        self.cod_final_6m.set(money(cod_final_6m))
 
     def collect_items(self):
         out = []
