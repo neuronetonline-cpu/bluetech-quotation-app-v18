@@ -1435,9 +1435,13 @@ class App:
         payment_combo = ttk.Combobox(controls, textvariable=payment_method, values=payment_methods, state="readonly", width=24)
         payment_combo.pack(side="left")
 
-        # Scrollable invoice body
+        # Fixed action bar at the bottom so Print / Preview / Save PDF are always visible.
+        actions=ttk.Frame(win, padding=8)
+        actions.pack(side="bottom", fill="x")
+
+        # Scrollable invoice body stays above the fixed action bar.
         outer = ttk.Frame(win)
-        outer.pack(fill="both", expand=True, padx=6, pady=2)
+        outer.pack(side="top", fill="both", expand=True, padx=6, pady=2)
         body_canvas = tk.Canvas(outer, highlightthickness=0)
         body_scroll = ttk.Scrollbar(outer, orient="vertical", command=body_canvas.yview)
         body = ttk.Frame(body_canvas)
@@ -1472,10 +1476,10 @@ class App:
             payment_total_var.set(money(total))
         ttk.Button(payment_box, text="+ ADD PAYMENT", command=add_payment_row).pack(anchor="w", pady=(0,4))
         payment_invoice_summary = ttk.Frame(payment_box); payment_invoice_summary.pack(fill="x", pady=(0,2))
-        ttk.Label(payment_invoice_summary, text="Invoice Total:", font=("Segoe UI",10,"bold")).pack(side="left")
+        ttk.Label(payment_invoice_summary, text="TOTAL INVOICE:", font=("Segoe UI",10,"bold")).pack(side="left")
         ttk.Label(payment_invoice_summary, textvariable=invoice_total_payment_var, font=("Segoe UI",10,"bold")).pack(side="left", padx=8)
         payment_summary = ttk.Frame(payment_box); payment_summary.pack(fill="x")
-        ttk.Label(payment_summary, text="Payments Total:", font=("Segoe UI",10,"bold")).pack(side="left")
+        ttk.Label(payment_summary, text="PAYMENTS TOTAL:", font=("Segoe UI",10,"bold")).pack(side="left")
         ttk.Label(payment_summary, textvariable=payment_total_var, font=("Segoe UI",10,"bold")).pack(side="left", padx=8)
         add_payment_row(payment_methods[0], "0")
 
@@ -1542,8 +1546,7 @@ class App:
         sc_qv.trace_add("write",calc_invoice); sc_uv.trace_add("write",calc_invoice)
         rebuild_table()
 
-        ttk.Label(win,text="Dot-matrix friendly invoice: text and horizontal separators only.",foreground=GREY).pack(anchor="w",padx=12,pady=(0,4))
-        actions=ttk.Frame(win,padding=8); actions.pack(fill="x")
+        ttk.Label(win,text="Dot-matrix friendly invoice: text and horizontal separators only.",foreground=GREY).pack(anchor="w",padx=12,pady=(0,4),before=actions)
 
         def invoice_data():
             rows=[]
@@ -1659,7 +1662,12 @@ class App:
                 except Exception as e: messagebox.showerror("Printer",f"Could not print invoice:\n{e}",parent=pw)
             ttk.Button(pw,text="PRINT",command=do_print).pack(pady=18)
 
+        def preview_invoice():
+            # Preview uses the same PDF output and opens it with the default PDF viewer.
+            save_invoice_pdf()
+
         ttk.Button(actions,text="SAVE INVOICE PDF",command=save_invoice_pdf).pack(side="right",padx=5)
+        ttk.Button(actions,text="PREVIEW INVOICE",command=preview_invoice).pack(side="right",padx=5)
         ttk.Button(actions,text="PRINT INVOICE",command=print_invoice).pack(side="right",padx=5)
         ttk.Button(actions,text="CLOSE",command=win.destroy).pack(side="right",padx=5)
 
