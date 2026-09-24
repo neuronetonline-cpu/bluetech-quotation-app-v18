@@ -1409,8 +1409,8 @@ class App:
 
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
-        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 17, "bold")).pack(side="left")
-        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 10)).pack(side="right")
+        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 30, "bold")).pack(side="left")
+        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 15)).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
@@ -1596,7 +1596,7 @@ class App:
                 nonlocal y
                 c.setFont("Courier-Bold" if bold else "Courier",size); c.drawString(left,y,str(s)[:95]); y-=4.2*mm
             txt("BLUETECH COMPUTERS",True,16)
-            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,9)
+            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,15)
             txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
             txt("077 633 7942 / 074 394 6233",False,8); ln()
             txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
@@ -1612,9 +1612,9 @@ class App:
             total=0
             for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                 total+=amt
-                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,8)
-                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,8)
-            ln(); txt(f"TOTAL : {total:,.2f}",True,10)
+                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,12)
+                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,12)
+            ln(); txt(f"TOTAL : {total:,.2f}",True,12)
             ln(); txt("PAYMENT BREAKDOWN",True,9)
             txt(f"INVOICE TOTAL : {money(total)}",True,8)
             for pm, pa in payment_lines(): txt(f"  {pm:<22} {money(pa):>15}",False,8)
@@ -1623,7 +1623,7 @@ class App:
             y-=2*mm; txt("WARRANTY CONDITIONS",True,9); ln()
             cond=get_setting("invoice_warranty_conditions","").replace("\\n","\n")
             for part in cond.splitlines() or [""]:
-                txt(part,False,7.5)
+                txt(part,False,8)
             y-=2*mm; txt("Thank you for your business!",False,8)
             c.save()
             try: os.startfile(filename)
