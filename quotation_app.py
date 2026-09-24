@@ -326,50 +326,52 @@ class App:
                                            values=users, state="readonly")
         self.prepared_combo.grid(row=3, column=0, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
 
-        # ---------- Items section ----------
-        section("QUOTATION ITEMS", "•  COST AND PROFIT ARE INTERNAL ONLY")
-        box = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
-        box.pack(fill="x", padx=12)
+        # ---------- Quotation workspace ----------
+        # The quotation table and internal calculation panel share the same
+        # horizontal workspace. The table uses the full available width of its
+        # left panel; there is no second/inner scrollbar.
+        workspace = tk.Frame(page_parent, bg="#F3F7FC")
+        workspace.pack(fill="x", padx=12, pady=(8, 0))
+        workspace.columnconfigure(0, weight=74)
+        workspace.columnconfigure(1, weight=26)
+        workspace.rowconfigure(0, weight=1)
 
+        # ---------- Quotation items ----------
+        items_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        items_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+
+        items_bar = tk.Frame(items_panel, bg="#0878D1", height=34)
+        items_bar.pack(fill="x")
+        items_bar.pack_propagate(False)
+        tk.Label(items_bar, text="QUOTATION ITEMS", bg="#0878D1", fg="white",
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
+        tk.Label(items_bar, text="•  COST AND PROFIT ARE INTERNAL ONLY", bg="#0878D1", fg="#DCEFFF",
+                 font=("Segoe UI", 8)).pack(side="left", padx=4)
+
+        self.table = tk.Frame(items_panel, bg="#FFFFFF")
+        self.table.pack(fill="x", padx=5, pady=(5, 0))
+
+        # # small | PRODUCT medium | DESCRIPTION largest | QTY small |
+        # COST small/medium | REMOVE small. These proportions stretch to
+        # the complete width of the left panel.
         heads = ["#", "PRODUCT", "DESCRIPTION", "QTY", "COST (LKR)", "REMOVE"]
-        # DESCRIPTION gets the largest share; PRODUCT is medium; QTY/COST/REMOVE stay compact.
-        weights = [0, 2, 6, 1, 2, 0]
-        for j, (h, wt) in enumerate(zip(heads, weights)):
-            box.columnconfigure(j, weight=wt, minsize=[40, 160, 350, 70, 120, 65][j])
-            tk.Label(box, text=h, bg="#CFE6FA", fg="#12345B",
+        for j, h in enumerate(heads):
+            weight = [0, 20, 52, 8, 14, 0][j]
+            minsize = [36, 150, 260, 70, 110, 70][j]
+            self.table.columnconfigure(j, weight=weight, minsize=minsize)
+            tk.Label(self.table, text=h, bg="#CFE6FA", fg="#12345B",
                      font=("Segoe UI", 8, "bold"), relief="solid", bd=1,
                      padx=5, pady=7).grid(row=0, column=j, sticky="nsew", padx=1, pady=1)
-
-        body = tk.Frame(box, bg="#FFFFFF")
-        body.grid(row=1, column=0, columnspan=6, sticky="nsew")
-        box.rowconfigure(1, weight=0, minsize=255)
-
-        self.table_canvas = tk.Canvas(body, bg="#FFFFFF", highlightthickness=0, bd=0)
-        self.table_scroll = ttk.Scrollbar(body, orient="vertical", command=self.table_canvas.yview)
-        self.table = tk.Frame(self.table_canvas, bg="#FFFFFF")
-        self.table_window = self.table_canvas.create_window((0, 0), window=self.table, anchor="nw")
-        self.table_canvas.configure(yscrollcommand=self.table_scroll.set)
-        self.table_canvas.pack(side="left", fill="both", expand=True)
-        # Keep scrolling available by mouse wheel, but do not show an inner scrollbar.
-        self.table_scroll.pack_forget()
-
-        def on_table_configure(_event=None):
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
-        def on_canvas_configure(event):
-            self.table_canvas.itemconfigure(self.table_window, width=event.width)
-        self.table.bind("<Configure>", on_table_configure)
-        self.table_canvas.bind("<Configure>", on_canvas_configure)
-        self.table_canvas.bind_all("<MouseWheel>", self._table_mousewheel, add="+")
 
         self.rows = []
         for p in DEFAULT_PRODUCTS:
             self.add_row(p, silent=True)
 
-        addbar = tk.Frame(page_parent, bg="#F3F7FC")
-        addbar.pack(fill="x", padx=12, pady=(4, 2))
+        addbar = tk.Frame(items_panel, bg="#F3F7FC")
+        addbar.pack(fill="x", padx=5, pady=(5, 6))
         ttk.Button(addbar, text="＋  ADD PRODUCT / ROW", style="Blue.TButton",
                    command=lambda: self.add_row("")).pack(side="left")
-        tk.Label(addbar, text="Scroll inside the product list when adding more rows.",
+        tk.Label(addbar, text="Scroll the main quotation page when adding more rows.",
                  bg="#F3F7FC", fg="#667085", font=("Segoe UI", 8)).pack(side="left", padx=12)
 
         # ---------- Internal calculation ----------
@@ -383,40 +385,60 @@ class App:
         self.cod_commission = tk.StringVar(value="LKR 0.00")
         self.cod_final = tk.StringVar(value="LKR 0.00")
 
-        section("INTERNAL CALCULATION")
-        calc = tk.Frame(page_parent, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1, padx=7, pady=7)
-        calc.pack(fill="x", padx=12)
-        labels = [("Total Cost", self.total_cost), ("Requested Profit", self.profit),
-                  ("3 Months Final Price", self.final90), ("6 Months Final Price (+35%)", self.final180),
-                  ("Weight (KG)", self.weight), ("COD Charge", self.cod_charge),
-                  ("COD Subtotal", self.cod_subtotal), ("COD Commission", self.cod_commission),
-                  ("Final COD Price", self.cod_final)]
-        for i, (lab, var) in enumerate(labels):
-            calc.columnconfigure(i, weight=1)
-            is_final_3m = lab == "3 Months Final Price"
+        calc_panel = tk.Frame(workspace, bg="#FFFFFF", highlightbackground="#B9D7EF", highlightthickness=1)
+        calc_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
+        calc_bar = tk.Frame(calc_panel, bg="#0878D1", height=34)
+        calc_bar.pack(fill="x")
+        calc_bar.pack_propagate(False)
+        tk.Label(calc_bar, text="INTERNAL CALCULATION", bg="#0878D1", fg="white",
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
+
+        calc_body = tk.Frame(calc_panel, bg="#FFFFFF", padx=8, pady=8)
+        calc_body.pack(fill="both", expand=True)
+        calc_body.columnconfigure(0, weight=1)
+        calc_body.columnconfigure(1, weight=1)
+
+        labels = [
+            ("3 Months Final Price", self.final90, True),
+            ("6 Months Final Price (+35%)", self.final180, False),
+            ("Total Cost", self.total_cost, False),
+            ("Requested Profit", self.profit, False),
+            ("Weight (KG)", self.weight, False),
+            ("COD Charge", self.cod_charge, False),
+            ("COD Commission", self.cod_commission, False),
+            ("COD Subtotal", self.cod_subtotal, False),
+            ("Final COD Price", self.cod_final, False),
+        ]
+
+        for i, (lab, var, is_final_3m) in enumerate(labels):
             card_bg = BLUE if is_final_3m else "#F7FAFE"
             card_border = BLUE if is_final_3m else "#D4E2F0"
-            card = tk.Frame(calc, bg=card_bg, highlightbackground=card_border, highlightthickness=1,
-                            padx=8, pady=5)
-            card.grid(row=0, column=i, sticky="nsew", padx=3)
-            tk.Label(card, text=lab, bg=card_bg, fg=("white" if is_final_3m else "#607086"),
-                     font=("Segoe UI", 8 if is_final_3m else 7, "bold")).pack(anchor="w")
+            card = tk.Frame(calc_body, bg=card_bg, highlightbackground=card_border,
+                            highlightthickness=1, padx=8, pady=6)
+            card.grid(row=i, column=0, columnspan=2, sticky="ew", pady=2)
+            card.columnconfigure(1, weight=1)
+            tk.Label(card, text=lab, bg=card_bg,
+                     fg=("white" if is_final_3m else "#17324D"),
+                     font=("Segoe UI", 8 if is_final_3m else 8, "bold"),
+                     anchor="w").grid(row=0, column=0, sticky="w", padx=(2, 8))
             if is_final_3m:
                 ent = tk.Entry(card, textvariable=var, justify="right",
                                font=("Segoe UI", 12, "bold"), bg=BLUE, fg="white",
                                insertbackground="white", relief="flat", bd=0,
                                highlightthickness=0)
             else:
-                ent = ttk.Entry(card, textvariable=var, justify="right", font=("Segoe UI", 9, "bold"))
-            ent.pack(fill="x", pady=(4, 0))
+                ent = ttk.Entry(card, textvariable=var, justify="right",
+                                font=("Segoe UI", 9, "bold"))
+            ent.grid(row=0, column=1, sticky="ew")
             if lab in ("Requested Profit", "Weight (KG)"):
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
 
-        calc_btn = tk.Button(calc, text="CALCULATE", command=self.recalc,
+        calc_btn = tk.Button(calc_body, text="CALCULATE", command=self.recalc,
                              bg="#0878D1", fg="white", activebackground="#0565B3",
                              activeforeground="white", font=("Segoe UI", 9, "bold"),
-                             relief="flat", padx=15, pady=12, cursor="hand2")
-        calc_btn.grid(row=0, column=len(labels), padx=(6, 2), sticky="ns")
+                             relief="flat", padx=15, pady=10, cursor="hand2")
+        calc_btn.grid(row=len(labels), column=0, columnspan=2, sticky="ew", pady=(6, 0))
 
         # ---------- Bottom actions ----------
         actions = tk.Frame(page_parent, bg="#F3F7FC")
@@ -443,10 +465,6 @@ class App:
                 return
             w = widget
             while w is not None:
-                # Let the quotation-items scrollbar handle mouse-wheel events
-                # while the pointer is inside the product table.
-                if w in (getattr(self, "table_canvas", None), getattr(self, "table_scroll", None)):
-                    return
                 if w == self.page_canvas:
                     self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
                     return "break"
@@ -515,12 +533,12 @@ class App:
                         relief="solid", bd=1, cursor="hand2")
         btn.grid(row=r, column=5, padx=2, pady=2, sticky="nsew")
         self.rows.append((p, d, q, c, widgets, btn, num_lbl))
-        for col, wt in enumerate([0, 2, 6, 1, 2, 0]):
-            self.table.columnconfigure(col, weight=wt, minsize=[40, 160, 350, 70, 120, 65][col])
-
-        if hasattr(self, "table_canvas"):
-            self.table_canvas.update_idletasks()
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
+        # Keep the hand-drawn layout proportions: narrow # / Qty / Cost / Remove,
+        # medium Product, and the widest Description column.
+        for col, (weight, minsize) in enumerate(zip(
+                [0, 20, 52, 8, 14, 0],
+                [36, 150, 260, 70, 110, 70])):
+            self.table.columnconfigure(col, weight=weight, minsize=minsize)
         if not silent:
             self.recalc()
 
@@ -558,9 +576,6 @@ class App:
                 w.configure(bg=row_bg)
                 w.grid_configure(row=r, column=j)
             row[5].grid_configure(row=r, column=5)
-        if hasattr(self, "table_canvas"):
-            self.table_canvas.update_idletasks()
-            self.table_canvas.configure(scrollregion=self.table_canvas.bbox("all"))
         self.recalc()
 
     def num(self, x):
