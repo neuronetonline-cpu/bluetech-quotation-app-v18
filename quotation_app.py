@@ -638,15 +638,17 @@ class App:
             if not inside_page:
                 return
 
-            if getattr(event, "num", None) == 4:
+            # Windows mouse-wheel: positive delta = UP, negative delta = DOWN.
+            # Use the sign directly so both directions work reliably.
+            delta = getattr(event, "delta", 0)
+            if delta:
+                units = -max(1, int(abs(delta) / 120)) if delta > 0 else max(1, int(abs(delta) / 120))
+            elif getattr(event, "num", None) == 4:
                 units = -3
             elif getattr(event, "num", None) == 5:
                 units = 3
             else:
-                delta = getattr(event, "delta", 0)
-                units = -max(1, int(abs(delta) / 120)) if delta < 0 else max(1, int(abs(delta) / 120))
-                if delta > 0:
-                    units = -units
+                return "break"
 
             self.page_canvas.yview_scroll(units, "units")
             return "break"
