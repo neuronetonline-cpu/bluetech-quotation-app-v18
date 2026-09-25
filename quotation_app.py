@@ -282,7 +282,6 @@ class App:
         # scrollbar on the far right of the application window.
         main_area = tk.Frame(self.root, bg="#F3F7FC")
         main_area.pack(fill="both", expand=True)
-        self.main_area = main_area
 
         self.page_canvas = tk.Canvas(main_area, bg="#F3F7FC", highlightthickness=0, bd=0)
         self.page_scroll = ttk.Scrollbar(main_area, orient="vertical", command=self.page_canvas.yview)
@@ -598,19 +597,21 @@ class App:
         self.recalc()
 
     def _page_mousewheel(self, event):
-        """Scroll the complete quotation page when the pointer is over the main content area."""
+        """Scroll the complete quotation page when the pointer is over it."""
         try:
-            x_root = self.root.winfo_pointerx()
-            y_root = self.root.winfo_pointery()
-
-            x1 = self.main_area.winfo_rootx()
-            y1 = self.main_area.winfo_rooty()
-            x2 = x1 + self.main_area.winfo_width()
-            y2 = y1 + self.main_area.winfo_height()
-
-            if x1 <= x_root <= x2 and y1 <= y_root <= y2:
-                self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
-                return "break"
+            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+            widget = self.root.winfo_containing(x, y)
+            if widget is None:
+                return
+            w = widget
+            while w is not None:
+                if w == self.page_canvas:
+                    self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
+                    return "break"
+                try:
+                    w = w.master
+                except Exception:
+                    break
         except Exception:
             pass
 
@@ -1383,23 +1384,30 @@ class App:
             messagebox.showwarning("Invoice", "Add at least one product before converting to invoice.")
             return
 
-        quote_total = self.num(self.final90.get())
+        warranty_prices = {
+            "3 MONTHS": self.num(self.final90.get()),
+            "6 MONTHS": self.num(self.final180.get()),
+        }
         cost_total = sum(self.num(q) * max(0.0, self.num(c)) for _, _, q, c in items)
         service_amount = max(0.0, self.num(self.service_charger.get()))
-        # Allocate the quotation's hardware portion across the product rows.
-        # If the quotation final price is still zero, fall back to the internal
-        # hardware cost so the invoice total is never incorrectly shown as zero.
-        hardware_total = quote_total - service_amount
-        if hardware_total <= 0:
-            hardware_total = cost_total
-        if hardware_total <= 0:
-            hardware_total = max(0.0, quote_total)
-        if hardware_total <= 0:
-            hardware_total = 0.0
-        if cost_total <= 0:
-            shares = [hardware_total / len(items)] * len(items)
-        else:
-            shares = [(self.num(q) * max(0.0, self.num(c)) / cost_total) * hardware_total for _, _, q, c in items]
+
+        # The invoice is tied to the selected warranty price.  Product rows are
+        # allocated proportionally, while the final row receives any rounding
+        # adjustment so the invoice total always exactly matches the selected
+        # quotation price (including the service charger).
+        selected_warranty = tk.StringVar(value="3 MONTHS")
+
+        def selected_invoice_total():
+            return max(0.0, warranty_prices.get(selected_warranty.get(), warranty_prices["3 MONTHS"]))
+
+        def product_shares():
+            target_hardware = max(0.0, selected_invoice_total() - service_amount)
+            if cost_total <= 0:
+                return [target_hardware / len(items)] * len(items)
+            return [
+                (self.num(q) * max(0.0, self.num(c)) / cost_total) * target_hardware
+                for _, _, q, c in items
+            ]
 
         win = tk.Toplevel(self.root)
         win.title("Bluetech Computers - Invoice")
@@ -1409,7 +1417,7 @@ class App:
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
         ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 30, "bold")).pack(side="left")
-        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 12)).pack(side="right")
+        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 15)).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
@@ -1439,6 +1447,12 @@ class App:
             unit_price_toggle.config(text="ON" if show_unit_price.get() else "OFF")
             rebuild_table()
         unit_price_toggle.config(command=toggle_unit_price)
+
+        ttk.Label(controls, text="WARRANTY PRICE:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0,5))
+        warranty_combo = ttk.Combobox(controls, textvariable=selected_warranty,
+                                      values=["3 MONTHS", "6 MONTHS"], state="readonly", width=13)
+        warranty_combo.pack(side="left", padx=(0,18))
+
         payment_methods = [x.strip() for x in get_setting("invoice_payment_methods", "CASH\nBANK TRANSFER\nCARD\nCREDIT").splitlines() if x.strip()] or ["CASH"]
         payment_method = tk.StringVar(value=payment_methods[0])
         ttk.Label(controls, text="Payment Method:").pack(side="left", padx=(25,5))
@@ -1503,18 +1517,38 @@ class App:
         sc_uv = tk.StringVar(value=str(max(0, self.num(self.service_charger.get()))))
         sc_av = tk.StringVar(value="LKR 0.00")
 
+        calc_running = False
+
         def calc_invoice(*_):
-            total = 0.0
-            for pv, dv, qv, uv, av in invoice_rows:
-                amount = self.num(qv.get()) * self.num(uv.get())
-                total += amount
-                av.set(money(amount))
-            sc_amount = self.num(sc_qv.get()) * self.num(sc_uv.get())
-            total += sc_amount
-            sc_av.set(money(sc_amount))
-            total_var.set(money(total))
-            invoice_total_payment_var.set(money(total))
-            calc_payments()
+            nonlocal calc_running
+            if calc_running:
+                return
+            calc_running = True
+            try:
+                target = selected_invoice_total()
+                total = 0.0
+                for idx, (pv, dv, qv, uv, av) in enumerate(invoice_rows):
+                    amount = self.num(qv.get()) * self.num(uv.get())
+                    if idx == len(invoice_rows) - 1:
+                        remaining = max(0.0, target - self.num(sc_qv.get()) * self.num(sc_uv.get()) - total)
+                        qty = self.num(qv.get())
+                        if qty > 0:
+                            adjusted_unit = remaining / qty
+                            uv.set(f"{adjusted_unit:.2f}")
+                            amount = qty * self.num(uv.get())
+                    total += amount
+                    av.set(money(amount))
+
+                sc_amount = self.num(sc_qv.get()) * self.num(sc_uv.get())
+                total += sc_amount
+
+                # The selected warranty price is authoritative. Payment Breakdown
+                # and invoice validation use this exact same amount.
+                total_var.set(money(target))
+                invoice_total_payment_var.set(money(target))
+                calc_payments()
+            finally:
+                calc_running = False
 
         def rebuild_table():
             for w in box.winfo_children():
@@ -1526,6 +1560,7 @@ class App:
             for j,h in enumerate(headers):
                 ttk.Label(box, text=h, font=("Segoe UI",9,"bold")).grid(row=0,column=j,padx=4,pady=4,sticky="ew")
                 box.columnconfigure(j, weight=1)
+            shares = product_shares()
             for idx, ((prod, desc, qty, _cost), share) in enumerate(zip(items, shares), start=1):
                 pv,dv=tk.StringVar(value=prod),tk.StringVar(value=desc)
                 qv=tk.StringVar(value=str(int(qty) if float(qty).is_integer() else qty))
@@ -1556,6 +1591,7 @@ class App:
             calc_invoice()
 
         sc_qv.trace_add("write",calc_invoice); sc_uv.trace_add("write",calc_invoice)
+        warranty_combo.bind("<<ComboboxSelected>>", lambda e: (rebuild_table(), calc_invoice()))
         rebuild_table()
 
         ttk.Label(controls, text="Dot-matrix friendly", foreground=GREY).pack(side="right", padx=8)
@@ -1595,7 +1631,7 @@ class App:
                 nonlocal y
                 c.setFont("Courier-Bold" if bold else "Courier",size); c.drawString(left,y,str(s)[:95]); y-=4.2*mm
             txt("BLUETECH COMPUTERS",True,16)
-            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,12)
+            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,15)
             txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
             txt("077 633 7942 / 074 394 6233",False,8); ln()
             txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
@@ -1605,14 +1641,15 @@ class App:
             if invoice_title.get().strip(): txt(f"TITLE      : {invoice_title.get().strip()}")
             ln()
             rows=invoice_data(); show=show_unit_price.get()
-            if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,9.5)
-            else: txt(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}",True,9.5)
+            if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,8)
+            else: txt(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}",True,8)
             ln()
             total=0
             for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                 total+=amt
-                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,9.5)
-                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,9.5)
+                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,12)
+                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,12)
+            total = selected_invoice_total()
             ln(); txt(f"TOTAL : {total:,.2f}",True,12)
             ln(); txt("PAYMENT BREAKDOWN",True,9)
             txt(f"INVOICE TOTAL : {money(total)}",True,8)
@@ -1658,6 +1695,7 @@ class App:
                     total+=amt
                     if show_unit_price.get(): line(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}")
                     else: line(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}")
+                total = selected_invoice_total()
                 line("-"*80); line(f"TOTAL : {total:,.2f}"); line("PAYMENT BREAKDOWN:"); line(f"INVOICE TOTAL : {money(total)}");
                 for pm, pa in payment_lines(): line(f"  {pm:<22} {money(pa):>15}");
                 line(f"PAYMENT TOTAL : {money(sum(pa for _, pa in payment_lines()))}"); line("="*80)
