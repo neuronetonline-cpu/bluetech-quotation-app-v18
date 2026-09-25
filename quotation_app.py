@@ -52,6 +52,16 @@ def resource_path(name):
     return os.path.join(base, name)
 
 
+def set_app_icon(root):
+    """Apply the bundled Bluetech logo as the application icon."""
+    icon_path = resource_path("BluetechComputers.ico")
+    if os.path.exists(icon_path):
+        try:
+            root.iconbitmap(icon_path)
+        except Exception:
+            pass
+
+
 def register_tk_font():
     """Load bundled Deadly Advance font into the Windows Tk process when available."""
     font_path = resource_path("Deadly Advance.ttf")
@@ -222,12 +232,19 @@ def money(v):
     return f"LKR {v:,.2f}"
 
 
+
+
 class App:
     def __init__(self, root):
         self.root = root
         self.root.title("Bluetech Computers - Desktop Quotation")
+        set_app_icon(self.root)
         self.root.geometry("1320x800")
         self.root.minsize(1000, 560)
+        try:
+            self.root.state("zoomed")
+        except Exception:
+            pass
         self.rows = []
         self.editing_id = None
         setup_db(db)
@@ -606,7 +623,10 @@ class App:
             w = widget
             while w is not None:
                 if w == self.page_canvas:
-                    self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
+                    try:
+                        self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
+                    except tk.TclError:
+                        pass
                     return "break"
                 try:
                     w = w.master
@@ -1474,7 +1494,21 @@ class App:
         body_canvas.configure(yscrollcommand=body_scroll.set)
         body_canvas.pack(side="left", fill="both", expand=True)
         body_scroll.pack(side="right", fill="y")
-        body_canvas.bind_all("<MouseWheel>", lambda e: body_canvas.yview_scroll(int(-e.delta/120), "units"))
+        def invoice_mousewheel(event):
+            try:
+                body_canvas.yview_scroll(int(-event.delta / 120), "units")
+            except tk.TclError:
+                pass
+            return "break"
+
+        def cleanup_invoice_mousewheel(_event=None):
+            try:
+                body_canvas.unbind_all("<MouseWheel>")
+            except Exception:
+                pass
+
+        win.bind("<MouseWheel>", invoice_mousewheel, add="+")
+        win.bind("<Destroy>", cleanup_invoice_mousewheel, add="+")
 
         payment_box = ttk.LabelFrame(body, text="Payment Breakdown", padding=6)
         payment_box.pack(fill="x", padx=4, pady=4)
@@ -1781,8 +1815,12 @@ class App:
         scrollbar.pack(side="right", fill="y")
 
         def wheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", wheel, add="+")
+            try:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+            return "break"
+        win.bind("<MouseWheel>", wheel, add="+")
 
         ttk.Label(body, text="PDF / Quotation Save Location", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 8))
         path_row = ttk.Frame(body); path_row.pack(fill="x")
@@ -1889,11 +1927,11 @@ class App:
                 set_setting("invoice_payment_methods","\n".join(methods))
                 set_setting("invoice_show_unit_price","1" if unit_default.get() else "0")
                 self.recalc(); self.refresh_prepared_users()
-                canvas.unbind_all("<MouseWheel>")
+                win.unbind("<MouseWheel>")
                 messagebox.showinfo("Settings","Settings saved successfully.",parent=win); win.destroy()
             except Exception as e: messagebox.showerror("Settings",f"Could not save settings:\n{e}",parent=win)
         ttk.Button(buttons,text="SAVE SETTINGS",style="Blue.TButton",command=save).pack(side="right",padx=5)
-        ttk.Button(buttons,text="CLOSE",command=lambda:(canvas.unbind_all("<MouseWheel>"),win.destroy())).pack(side="right",padx=5)
+        ttk.Button(buttons,text="CLOSE",command=lambda:(win.unbind("<MouseWheel>"),win.destroy())).pack(side="right",padx=5)
 
     def refresh_prepared_users(self):
         if not hasattr(self, "prepared_combo"):
@@ -2192,5 +2230,6 @@ class App:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    set_app_icon(root)
     App(root)
     root.mainloop()
