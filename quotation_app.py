@@ -291,7 +291,7 @@ class App:
         hb.pack(side="right", padx=18)
         ttk.Button(hb, text="＋  New Quotation", style="Blue.TButton", command=self.new_quote).pack(side="left", padx=4)
         ttk.Button(hb, text="Quotation History", style="Blue.TButton", command=self.history).pack(side="left", padx=4)
-        ttk.Button(hb, text="Job Chit History", style="Blue.TButton", command=lambda: show_job_history(self, db, get_pdf_dir)).pack(side="left", padx=4)
+        ttk.Button(hb, text="Job Sheet History", style="Blue.TButton", command=lambda: show_job_history(self, db, get_pdf_dir)).pack(side="left", padx=4)
         ttk.Button(hb, text="⚙  Settings", style="Blue.TButton", command=self.settings).pack(side="left", padx=4)
 
         # ---------- Main scrollable content ----------
@@ -607,7 +607,7 @@ class App:
         actions.pack(fill="x", padx=12, pady=(6, 10))
         ttk.Button(actions, text="CLEAR", style="Light.TButton", command=self.new_quote).pack(side="left", padx=3)
         ttk.Button(actions, text="SAVE QUOTATION", style="Blue.TButton", command=self.save_quote).pack(side="right", padx=3)
-        ttk.Button(actions, text="CREATE JOB CHIT", style="Green.TButton", command=lambda: open_job_chit(self, db, get_pdf_dir)).pack(side="right", padx=3)
+        ttk.Button(actions, text="CREATE JOB SHEET", style="Green.TButton", command=lambda: open_job_chit(self, db, get_pdf_dir)).pack(side="right", padx=3)
         ttk.Button(actions, text="SAVE AS NEW QUOTATION", style="Blue.TButton", command=self.save_as_new_quote).pack(side="right", padx=3)
         ttk.Button(actions, text="PREVIEW / SAVE PDF", style="Blue.TButton", command=self.save_pdf).pack(side="right", padx=3)
         ttk.Button(actions, text="WHATSAPP QUOTATION", style="Green.TButton", command=self.whatsapp_quotation).pack(side="right", padx=3)
