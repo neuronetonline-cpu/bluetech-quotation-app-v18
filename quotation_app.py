@@ -317,6 +317,8 @@ class App:
         self.page_content.bind("<Configure>", on_page_content_configure)
         self.page_canvas.bind("<Configure>", on_page_canvas_configure)
         self.page_canvas.bind_all("<MouseWheel>", self._page_mousewheel, add="+")
+        self.page_canvas.bind_all("<Button-4>", self._page_mousewheel, add="+")
+        self.page_canvas.bind_all("<Button-5>", self._page_mousewheel, add="+")
 
         # All page sections below the fixed header are placed inside this frame.
         page_parent = self.page_content
@@ -362,6 +364,7 @@ class App:
             entry = ttk.Entry(info, textvariable=var)
             entry.grid(row=1, column=col, columnspan=2, sticky="ew", padx=7, pady=(3, 4))
             self.info_entries[lab] = entry
+            self._bind_main_arrow_focus(entry)
 
         # Enter navigation: Customer -> WhatsApp -> Prepared By -> first Description.
         self.info_entries["Customer Name"].bind("<Return>", lambda event: self.focus_info_entry("WhatsApp / Phone"))
@@ -380,6 +383,7 @@ class App:
         self.quotation_title_entry = ttk.Entry(info, textvariable=self.quotation_title)
         self.quotation_title_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=7, pady=(3, 0))
         self.quotation_title_entry.bind("<Return>", lambda event: self.focus_first_description())
+        self._bind_main_arrow_focus(self.quotation_title_entry)
 
         # ---------- Quotation workspace ----------
         # The quotation table and internal calculation panel share the same
@@ -498,6 +502,7 @@ class App:
                                highlightthickness=1, highlightbackground="#C8D6E5",
                                highlightcolor="#0878D1")
                 ent.grid(row=0, column=1, sticky="ew")
+                self._bind_main_arrow_focus(ent)
                 ent.bind("<KeyRelease>", lambda e: self.recalc())
                 if lab == "Weight (KG)":
                     self.weight_entry = ent
@@ -614,26 +619,39 @@ class App:
         self.recalc()
 
     def _page_mousewheel(self, event):
-        """Scroll the complete quotation page when the pointer is over it."""
+        """Scroll the complete quotation page with the mouse wheel."""
         try:
             x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
             widget = self.root.winfo_containing(x, y)
             if widget is None:
                 return
             w = widget
+            inside_page = False
             while w is not None:
                 if w == self.page_canvas:
-                    try:
-                        self.page_canvas.yview_scroll(int(-event.delta / 120), "units")
-                    except tk.TclError:
-                        pass
-                    return "break"
+                    inside_page = True
+                    break
                 try:
                     w = w.master
                 except Exception:
                     break
-        except Exception:
-            pass
+            if not inside_page:
+                return
+
+            if getattr(event, "num", None) == 4:
+                units = -3
+            elif getattr(event, "num", None) == 5:
+                units = 3
+            else:
+                delta = getattr(event, "delta", 0)
+                units = -max(1, int(abs(delta) / 120)) if delta < 0 else max(1, int(abs(delta) / 120))
+                if delta > 0:
+                    units = -units
+
+            self.page_canvas.yview_scroll(units, "units")
+            return "break"
+        except (tk.TclError, AttributeError):
+            return "break"
 
     def _table_mousewheel(self, event):
         # The quotation table is not a separate canvas.
@@ -664,6 +682,7 @@ class App:
                          highlightcolor="#0878D1")
             e.grid(row=r + 1, column=j, padx=2, pady=2, sticky="ew", ipady=3)
             widgets.append(e)
+            self._bind_table_arrow_focus(e)
             if j == 1:
                 # Main product names are always shown in CAPITAL letters.
                 e.bind("<KeyRelease>", lambda event, var=p, widget=e: self._product_keyrelease(var, widget))
@@ -757,6 +776,53 @@ class App:
                 activebackground="#D7E4F0",
                 activeforeground="#17324D"
             )
+
+    def _move_main_edit_focus(self, widget, direction):
+        """Move Up/Down focus between editable fields in the main quotation form."""
+        fields = []
+        for name in ("Customer Name", "WhatsApp / Phone"):
+            entry = getattr(self, "info_entries", {}).get(name)
+            if entry is not None:
+                fields.append(entry)
+        title = getattr(self, "quotation_title_entry", None)
+        if title is not None:
+            fields.append(title)
+        for name in ("profit_entry", "service_charger_entry", "weight_entry"):
+            entry = getattr(self, name, None)
+            if entry is not None:
+                fields.append(entry)
+        if widget not in fields:
+            return
+        idx = fields.index(widget)
+        target = idx + direction
+        if 0 <= target < len(fields):
+            fields[target].focus_set()
+            try:
+                fields[target].selection_range(0, tk.END)
+            except Exception:
+                pass
+        return "break"
+
+    def _move_table_arrow_focus(self, widget, direction):
+        """Move Up/Down focus to the same editable column in the adjacent row."""
+        for idx, row in enumerate(self.rows):
+            if widget in row[4]:
+                col = row[4].index(widget)
+                target = idx + direction
+                if 0 <= target < len(self.rows):
+                    target_widget = self.rows[target][4][col]
+                    target_widget.focus_set()
+                    target_widget.selection_range(0, tk.END)
+                return "break"
+        return "break"
+
+    def _bind_main_arrow_focus(self, widget):
+        widget.bind("<Up>", lambda event, w=widget: self._move_main_edit_focus(w, -1), add="+")
+        widget.bind("<Down>", lambda event, w=widget: self._move_main_edit_focus(w, 1), add="+")
+
+    def _bind_table_arrow_focus(self, widget):
+        widget.bind("<Up>", lambda event, w=widget: self._move_table_arrow_focus(w, -1), add="+")
+        widget.bind("<Down>", lambda event, w=widget: self._move_table_arrow_focus(w, 1), add="+")
 
     def focus_info_entry(self, name):
         entry = getattr(self, "info_entries", {}).get(name)
@@ -1433,6 +1499,9 @@ class App:
         win.title("Bluetech Computers - Invoice")
         win.geometry("1050x760")
         win.minsize(900, 620)
+        win.transient(self.root)
+        win.grab_set()
+        win.focus_force()
 
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
@@ -1501,14 +1570,9 @@ class App:
                 pass
             return "break"
 
-        def cleanup_invoice_mousewheel(_event=None):
-            try:
-                body_canvas.unbind_all("<MouseWheel>")
-            except Exception:
-                pass
-
+        # Keep invoice scrolling local to this window. Do not use unbind_all(),
+        # because that would remove the main quotation window's mouse-wheel binding.
         win.bind("<MouseWheel>", invoice_mousewheel, add="+")
-        win.bind("<Destroy>", cleanup_invoice_mousewheel, add="+")
 
         payment_box = ttk.LabelFrame(body, text="Payment Breakdown", padding=6)
         payment_box.pack(fill="x", padx=4, pady=4)
@@ -1709,6 +1773,9 @@ class App:
             if not printers:
                 messagebox.showerror("Printer","No Windows printers were found.",parent=win); return
             pw=tk.Toplevel(win); pw.title("Select Printer"); pw.geometry("520x180")
+            pw.transient(win)
+            pw.grab_set()
+            pw.focus_force()
             ttk.Label(pw,text="Printer").pack(anchor="w",padx=15,pady=(15,5))
             try: default=win32print.GetDefaultPrinter()
             except Exception: default=printers[0]
@@ -1952,6 +2019,9 @@ class App:
         win = tk.Toplevel(self.root)
         win.title("Quotation History")
         win.geometry("1160x650")
+        win.transient(self.root)
+        win.grab_set()
+        win.focus_force()
 
         search_var = tk.StringVar()
         search_row = ttk.Frame(win, padding=10)
