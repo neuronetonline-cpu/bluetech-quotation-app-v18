@@ -1630,8 +1630,8 @@ class App:
             def txt(s,bold=False,size=9):
                 nonlocal y
                 c.setFont("Courier-Bold" if bold else "Courier",size); c.drawString(left,y,str(s)[:95]); y-=4.2*mm
-            txt("BLUETECH COMPUTERS",True,16)
-            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,15)
+            txt("BLUETECH COMPUTERS",True,20)
+            txt("COMPUTER SALES | REPAIRS | UPGRADES",False,12)
             txt("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama",False,8)
             txt("077 633 7942 / 074 394 6233",False,8); ln()
             txt(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}",True)
@@ -1641,14 +1641,14 @@ class App:
             if invoice_title.get().strip(): txt(f"TITLE      : {invoice_title.get().strip()}")
             ln()
             rows=invoice_data(); show=show_unit_price.get()
-            if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,8)
-            else: txt(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}",True,8)
+            if show: txt(f"{'#':<3}{'PRODUCT':<24}{'DESCRIPTION':<28}{'QTY':>5}{'UNIT PRICE':>13}{'AMOUNT':>14}",True,9.5)
+            else: txt(f"{'#':<3}{'PRODUCT':<30}{'DESCRIPTION':<33}{'QTY':>5}",True,9.5)
             ln()
             total=0
             for i,(prod,desc,qty,unit,amt) in enumerate(rows,1):
                 total+=amt
-                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,12)
-                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,12)
+                if show: txt(f"{i:<3}{prod[:24]:<24}{desc[:28]:<28}{qty:>5g}{unit:>13.2f}{amt:>14.2f}",False,9.5)
+                else: txt(f"{i:<3}{prod[:30]:<30}{desc[:33]:<33}{qty:>5g}",False,9.5)
             total = selected_invoice_total()
             ln(); txt(f"TOTAL : {total:,.2f}",True,12)
             ln(); txt("PAYMENT BREAKDOWN",True,9)
