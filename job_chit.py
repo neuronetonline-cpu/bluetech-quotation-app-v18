@@ -299,8 +299,25 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
         if not sys.platform.startswith('win'):
             messagebox.showinfo('Print',f'Open the PDF and print it:\n{path}',parent=win); return
         if messagebox.askyesno('Print Job Chit','Send the job chit to your DEFAULT Windows printer?',parent=win):
-            try: os.startfile(path,'print')
-            except OSError as e: messagebox.showerror('Printer',f'Printing failed: {e}\nPDF saved at {path}',parent=win)
+            try:
+                os.startfile(path, 'print')
+            except OSError as e:
+                # Windows may not have a PDF viewer registered with a direct
+                # 'print' shell action (WinError 1155). Open the generated PDF
+                # so it can be printed from the PDF viewer instead.
+                if getattr(e, 'winerror', None) == 1155 or getattr(e, 'errno', None) == 1155:
+                    try:
+                        os.startfile(path, 'open')
+                        messagebox.showinfo(
+                            'Print',
+                            'Windows does not have a direct PDF print action configured.\n\n'
+                            'The Job Chit PDF has been opened. Use Ctrl+P or the Print button in the PDF viewer.',
+                            parent=win
+                        )
+                    except OSError:
+                        messagebox.showerror('Printer', f'Printing failed.\nPDF saved at {path}', parent=win)
+                else:
+                    messagebox.showerror('Printer', f'Printing failed: {e}\nPDF saved at {path}', parent=win)
     actions = ttk.Frame(win,padding=12); actions.pack(fill='x')
     ttk.Button(actions,text='SAVE JOB CHIT',command=save).pack(side='left',padx=4)
     ttk.Button(actions,text='SAVE / PREVIEW PDF',command=pdf_click).pack(side='left',padx=4)
