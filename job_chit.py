@@ -5,10 +5,6 @@ import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
-try:
-    import win32print
-except Exception:
-    win32print = None
 from datetime import datetime
 from xml.sax.saxutils import escape
 from reportlab.lib import colors
@@ -63,6 +59,7 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
 
     win = tk.Toplevel(app.root); win.title('Bluetech Computers - PC Build Job Chit')
     win.geometry('1020x780'); win.minsize(780, 550)
+    win.transient(app.root); win.grab_set(); win.focus_force()
     outer = ttk.Frame(win); outer.pack(fill='both', expand=True)
     canvas = tk.Canvas(outer, highlightthickness=0, bg='#F3F7FC')
     scrollbar = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
@@ -298,126 +295,13 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
                 else: subprocess.Popen(['xdg-open',path])
             except OSError: pass
     def print_click():
-        # Direct Windows printer printing, matching the Invoice window.
+        path=make_pdf()
+        if not path: return
         if not sys.platform.startswith('win'):
-            path = make_pdf()
-            if path:
-                messagebox.showinfo('Print', f'Open the PDF and print it:\n{path}', parent=win)
-            return
-        if win32print is None:
-            messagebox.showerror('Printer', 'Direct printer support is not available. Please install pywin32.', parent=win)
-            return
-
-        try:
-            printers = [p[2] for p in win32print.EnumPrinters(
-                win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-            )]
-        except Exception as e:
-            messagebox.showerror('Printer', f'Could not read Windows printers:\n{e}', parent=win)
-            return
-
-        if not printers:
-            messagebox.showerror('Printer', 'No Windows printers were found.', parent=win)
-            return
-
-        printer_win = tk.Toplevel(win)
-        printer_win.title('Select Printer')
-        printer_win.geometry('520x180')
-        printer_win.transient(win)
-        printer_win.grab_set()
-
-        ttk.Label(printer_win, text='Printer').pack(anchor='w', padx=15, pady=(15, 5))
-        try:
-            default_printer = win32print.GetDefaultPrinter()
-        except Exception:
-            default_printer = printers[0]
-        printer_var = tk.StringVar(value=default_printer if default_printer in printers else printers[0])
-        combo = ttk.Combobox(printer_win, textvariable=printer_var, values=printers, state='readonly', width=58)
-        combo.pack(padx=15, fill='x')
-
-        def do_print():
-            printer_name = printer_var.get().strip()
-            if not printer_name:
-                messagebox.showwarning('Printer', 'Select a printer.', parent=printer_win)
-                return
-
-            # Direct RAW text output for dot-matrix printers.
-            lines = []
-            def line(txt=''):
-                lines.append(str(txt)[:100])
-
-            line('BLUETECH COMPUTERS')
-            line('PC BUILD JOB CHIT | INTERNAL WORKSHOP COPY')
-            line('230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama')
-            line('077 633 7942 / 074 394 6233')
-            line('=' * 100)
-            line(f'JOB NO     : {number}')
-            line(f'QUOTATION  : {qno}')
-            line(f'CUSTOMER   : {customer}')
-            line(f'PHONE      : {phone}')
-            line(f'CREATED    : {created}')
-            line(f'DUE DATE   : {due_var.get().strip() or "-"}')
-            line(f'STATUS     : {status_var.get()}')
-            line('-' * 100)
-            line('BUILD COMPONENTS')
-            line('-' * 100)
-            line(f'{"#":<4}{"PRODUCT":<28}{"DESCRIPTION":<52}{"QTY":>8}')
-            line('-' * 100)
-            for i, (prod, desc, qty) in enumerate(current_items(), 1):
-                product_text = str(prod or '')[:27]
-                desc_text = str(desc or '-')[:51]
-                qty_text = str(qty or '')[:8]
-                line(f'{i:<4}{product_text:<28}{desc_text:<52}{qty_text:>8}')
-            line('-' * 100)
-            line('STAFF / RESPONSIBILITY')
-            line('-' * 100)
-            line(f'{"STAGE":<24}{"STAFF":<30}{"DATE / TIME":<24}{"CHECK":>8}')
-            line('-' * 100)
-            for stage in STAGES:
-                staff_name = staff_vars[stage].get().strip() or '-'
-                stamp = time_vars[stage].get().strip() or '-'
-                line(f'{stage:<24}{staff_name[:29]:<30}{stamp[:23]:<24}{"[ ]":>8}')
-            line('-' * 100)
-            line('BUILD / FINAL CHECKLIST')
-            line('-' * 100)
-            for item in CHECKS:
-                mark = '[X]' if check_vars[item].get() else '[ ]'
-                line(f'{mark} {item}')
-            line('-' * 100)
-            line('WORKSHOP REMARKS / SERIAL NUMBERS')
-            line('-' * 100)
-            remarks_text = remarks.get('1.0', 'end-1c').strip()
-            for part in (remarks_text.splitlines() if remarks_text else ['-']):
-                line(part)
-            line('-' * 100)
-            line('WORKSHOP SIGNATURE: ____________________________    FINAL APPROVAL: ____________________________')
-            line('DATE: ____________________')
-            line('=' * 100)
-            data = '\r\n'.join(lines) + '\r\n\f'
-
-            h = None
-            try:
-                h = win32print.OpenPrinter(printer_name)
-                try:
-                    win32print.StartDocPrinter(h, 1, (number, None, 'RAW'))
-                    win32print.StartPagePrinter(h)
-                    win32print.WritePrinter(h, data.encode('cp437', errors='replace'))
-                    win32print.EndPagePrinter(h)
-                    win32print.EndDocPrinter(h)
-                finally:
-                    win32print.ClosePrinter(h)
-                messagebox.showinfo('Job Chit', f'Job Chit sent to {printer_name}.', parent=printer_win)
-                printer_win.destroy()
-            except Exception as e:
-                try:
-                    if h:
-                        win32print.ClosePrinter(h)
-                except Exception:
-                    pass
-                messagebox.showerror('Printer', f'Could not print Job Chit:\n{e}', parent=printer_win)
-
-        ttk.Button(printer_win, text='PRINT', command=do_print).pack(pady=18)
-        combo.focus_set()
+            messagebox.showinfo('Print',f'Open the PDF and print it:\n{path}',parent=win); return
+        if messagebox.askyesno('Print Job Chit','Send the job chit to your DEFAULT Windows printer?',parent=win):
+            try: os.startfile(path,'print')
+            except OSError as e: messagebox.showerror('Printer',f'Printing failed: {e}\nPDF saved at {path}',parent=win)
     actions = ttk.Frame(win,padding=12); actions.pack(fill='x')
     ttk.Button(actions,text='SAVE JOB CHIT',command=save).pack(side='left',padx=4)
     ttk.Button(actions,text='SAVE / PREVIEW PDF',command=pdf_click).pack(side='left',padx=4)
@@ -432,6 +316,7 @@ def app_get_users(db):
 def show_job_history(app, db, get_pdf_dir):
     setup_db(db)
     win=tk.Toplevel(app.root); win.title('Job Chit History'); win.geometry('1000x560')
+    win.transient(app.root); win.grab_set(); win.focus_force()
     search=tk.StringVar(); ttk.Entry(win,textvariable=search).pack(fill='x',padx=12,pady=8)
     tree=ttk.Treeview(win,columns=('job','quote','customer','status','date'),show='headings')
     for col,label in [('job','Job No.'),('quote','Quotation No.'),('customer','Customer'),('status','Status'),('date','Created')]:
