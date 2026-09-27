@@ -3,12 +3,19 @@ import sqlite3
 import subprocess
 import sys
 import webbrowser
+import textwrap
 from job_chit import open_job_chit, show_job_history, setup_db
 from datetime import datetime
 from urllib.parse import quote
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
+from ui_theme import add_window_header, apply_ui_theme
+
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
 import tkinter.font as tkfont
 
 try:
@@ -114,6 +121,10 @@ def db():
         c.execute("ALTER TABLE items ADD COLUMN cost REAL DEFAULT 0")
     c.execute("CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, active INTEGER DEFAULT 1)")
+    c.execute("""CREATE TABLE IF NOT EXISTS product_master(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, product TEXT UNIQUE COLLATE NOCASE,
+        cost REAL DEFAULT 0, description TEXT DEFAULT ''
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS invoices(
         id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_no TEXT UNIQUE, quotation_no TEXT,
         customer TEXT, phone TEXT, date TEXT, total REAL DEFAULT 0, created_at TEXT
@@ -248,11 +259,18 @@ class App:
         self.rows = []
         self.editing_id = None
         setup_db(db)
+        self.product_master = []
+        self.refresh_product_master()
+        self._product_popup = None
+        self._product_popup_entry = None
+        self._product_popup_items = []
+        self.root.bind("<Button-1>", self._product_root_click, add="+")
         self.build()
 
     def build(self):
         # Polished Bluetech desktop UI. The quotation item list has its own
         # scrollbar so the calculation and action areas always remain visible.
+        apply_ui_theme(self.root)
         style = ttk.Style()
         try:
             style.theme_use("clam")
@@ -602,14 +620,19 @@ class App:
                                highlightthickness=0, state="readonly", readonlybackground="#FFFFFF")
                 ent.grid(row=0, column=1, sticky="ew")
 
-        # ---------- Bottom actions ----------
-        actions = tk.Frame(page_parent, bg="#F3F7FC")
-        actions.pack(fill="x", padx=12, pady=(6, 10))
+        # ---------- Fixed quotation actions ----------
+        # Keep the main actions available while the customer and item sections
+        # scroll. Users should not have to return to the bottom of a long quote
+        # to save, preview, or share it.
+        actions = tk.Frame(self.root, bg="#FFFFFF", highlightbackground="#D7E5F2",
+                           highlightthickness=1, padx=10, pady=7)
+        actions.pack(side="bottom", fill="x")
         ttk.Button(actions, text="CLEAR", style="Light.TButton", command=self.new_quote).pack(side="left", padx=3)
         ttk.Button(actions, text="SAVE QUOTATION", style="Blue.TButton", command=self.save_quote).pack(side="right", padx=3)
         ttk.Button(actions, text="CREATE JOB SHEET", style="Green.TButton", command=lambda: open_job_chit(self, db, get_pdf_dir)).pack(side="right", padx=3)
         ttk.Button(actions, text="SAVE AS NEW QUOTATION", style="Blue.TButton", command=self.save_as_new_quote).pack(side="right", padx=3)
         ttk.Button(actions, text="PREVIEW / SAVE PDF", style="Blue.TButton", command=self.save_pdf).pack(side="right", padx=3)
+        ttk.Button(actions, text="EXPORT IMAGE", style="Blue.TButton", command=self.export_quotation_image).pack(side="right", padx=3)
         ttk.Button(actions, text="WHATSAPP QUOTATION", style="Green.TButton", command=self.whatsapp_quotation).pack(side="right", padx=3)
         inv_btn = tk.Button(actions, text="CONVERT TO INVOICE", command=self.convert_to_invoice,
                             bg="#E53935", fg="white", activebackground="#C62828", activeforeground="white",
@@ -625,21 +648,24 @@ class App:
             widget = self.root.winfo_containing(x, y)
             if widget is None:
                 return
+
+            # page_content is the widget embedded inside page_canvas. It is
+            # therefore not a descendant of page_canvas in Tk's widget tree.
+            # Check for page_content (or its children) instead.
             w = widget
             inside_page = False
             while w is not None:
-                if w == self.page_canvas:
+                if w == self.page_content:
                     inside_page = True
                     break
                 try:
                     w = w.master
                 except Exception:
                     break
+
             if not inside_page:
                 return
 
-            # Windows mouse-wheel: positive delta = UP, negative delta = DOWN.
-            # Use the sign directly so both directions work reliably.
             delta = getattr(event, "delta", 0)
             if delta:
                 units = -max(1, int(abs(delta) / 120)) if delta > 0 else max(1, int(abs(delta) / 120))
@@ -684,22 +710,27 @@ class App:
                          highlightcolor="#0878D1")
             e.grid(row=r + 1, column=j, padx=2, pady=2, sticky="ew", ipady=3)
             widgets.append(e)
-            self._bind_table_arrow_focus(e)
+            if j != 1:
+                self._bind_table_arrow_focus(e)
             if j == 1:
-                # Main product names are always shown in CAPITAL letters.
+                # PRODUCT is the category/type field. Stock autocomplete belongs to DESCRIPTION.
                 e.bind("<KeyRelease>", lambda event, var=p, widget=e: self._product_keyrelease(var, widget))
             elif j == 2:
-                # DESCRIPTION is always shown in CAPITAL letters.
-                e.bind("<KeyRelease>", lambda event, var=d, widget=e: self._description_keyrelease(var, widget))
+                # DESCRIPTION is the actual stock/product name from the Excel master.
+                e.bind("<KeyRelease>", lambda event, var=d, widget=e: self._description_keyrelease(var, widget, event))
+                # When suggestions are open, Up/Down/Enter are handled by the popup.
+                # Otherwise they keep the normal table navigation behaviour.
+                e.bind("<Up>", lambda event, widget=e: self._description_popup_navigation(event, widget), add="+")
+                e.bind("<Down>", lambda event, widget=e: self._description_popup_navigation(event, widget), add="+")
+                e.bind("<Return>", lambda event, widget=e: self._description_popup_return(event, widget), add="+")
+                e.bind("<Escape>", lambda event: self._description_popup_escape(event), add="+")
             elif j == 3:
                 # Quantity greater than 1 is visually emphasized.
                 e.bind("<KeyRelease>", lambda event, var=q, widget=e: self._qty_keyrelease(var, widget))
             elif j == 4:
                 # Recalculate immediately while COST is being entered.
                 e.bind("<KeyRelease>", lambda event: self.recalc())
-            if j == 2:
-                e.bind("<Return>", lambda event, widget=e: self.focus_next_or_cost(widget, 1, 3))
-            elif j == 3:
+            if j == 3:
                 # QTY -> same field in next row; last QTY -> Requested Profit
                 e.bind("<Return>", lambda event, widget=e: self.focus_next_or_profit(widget, 2))
             elif j == 4:
@@ -733,6 +764,11 @@ class App:
             var.set(upper)
             widget.icursor(tk.END)
         widget.configure(font=("Segoe UI", 9, "bold"))
+        matches = self._product_matches(upper)
+        if matches:
+            self._show_product_suggestions(widget, matches)
+        else:
+            self.hide_product_suggestions()
         self.recalc()
 
     def _qty_keyrelease(self, var, widget):
@@ -743,12 +779,22 @@ class App:
         widget.configure(font=("Segoe UI", 9, "bold") if qty > 1 else ("Segoe UI", 9))
         self.recalc()
 
-    def _description_keyrelease(self, var, widget):
+    def _description_keyrelease(self, var, widget, event=None):
+        # Arrow/Enter/Escape are handled by the autocomplete navigation bindings.
+        # Do not rebuild the popup on their KeyRelease event, otherwise the
+        # selected row is reset to the first suggestion immediately.
+        if event is not None and event.keysym in ("Up", "Down", "Return", "Escape"):
+            return
         value = var.get()
         upper = value.upper()
         if value != upper:
             var.set(upper)
             widget.icursor(tk.END)
+        matches = self._product_matches(upper)
+        if matches:
+            self._show_product_suggestions(widget, matches)
+        else:
+            self.hide_product_suggestions()
         self.recalc()
 
     def toggle_predeposit_cod(self):
@@ -758,6 +804,9 @@ class App:
             "1" if self.show_predeposit_cod.get() else "0"
         )
         self.update_predeposit_toggle()
+        # Recalculate immediately after switching ON/OFF so the quotation
+        # amount is available to the PDF/quotation output without another edit.
+        self.recalc()
 
     def update_predeposit_toggle(self):
         if not hasattr(self, "predeposit_toggle"):
@@ -806,7 +855,15 @@ class App:
         return "break"
 
     def _move_table_arrow_focus(self, widget, direction):
-        """Move Up/Down focus to the same editable column in the adjacent row."""
+        """Move Up/Down focus to the same editable column in the adjacent row.
+
+        If the stock autocomplete popup is open for this widget, do not consume
+        the arrow event here; the autocomplete handler registered later on the
+        widget must receive it and move inside the suggestion list instead.
+        """
+        if (self._product_popup is not None
+                and self._product_popup_entry is widget):
+            return None
         for idx, row in enumerate(self.rows):
             if widget in row[4]:
                 col = row[4].index(widget)
@@ -1461,6 +1518,70 @@ class App:
             )
         return filename
 
+    def export_quotation_image(self):
+        """Export the current quotation as a high-resolution PNG image.
+
+        The quotation is first rendered using the exact same PDF layout, then
+        the first PDF page is converted to PNG so the image matches the
+        existing quotation design.
+        """
+        self.recalc()
+        if not self.customer.get().strip():
+            messagebox.showwarning("Customer", "Enter customer name.")
+            return None
+
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            messagebox.showerror(
+                "Image Export",
+                "Image export requires PyMuPDF (fitz).\n\n"
+                "Install it with: pip install pymupdf"
+            )
+            return None
+
+        # Build/update the PDF using the existing quotation renderer so the
+        # exported image is visually identical to the PDF quotation.
+        pdf_path = self.save_pdf(silent=True)
+        if not pdf_path or not os.path.exists(pdf_path):
+            messagebox.showerror("Image Export", "Could not create the quotation PDF for image export.")
+            return None
+
+        image_path = os.path.splitext(pdf_path)[0] + ".png"
+
+        try:
+            pdf = fitz.open(pdf_path)
+            if len(pdf) == 0:
+                pdf.close()
+                raise RuntimeError("Quotation PDF has no pages.")
+
+            page = pdf[0]
+            # 2.5x A4 rendering gives a sharp image suitable for WhatsApp
+            # and customer sharing while keeping the file size reasonable.
+            matrix = fitz.Matrix(2.5, 2.5)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            pix.save(image_path)
+            pdf.close()
+
+            try:
+                if sys.platform.startswith("win"):
+                    os.startfile(image_path)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", image_path])
+                else:
+                    subprocess.Popen(["xdg-open", image_path])
+            except Exception:
+                pass
+
+            messagebox.showinfo(
+                "Image Exported",
+                f"Quotation image created successfully:\n{image_path}"
+            )
+            return image_path
+        except Exception as e:
+            messagebox.showerror("Image Export", f"Could not export quotation image.\n\n{e}")
+            return None
+
     def convert_to_invoice(self):
         """Open a simple dot-matrix friendly invoice window."""
         self.recalc()
@@ -1498,6 +1619,8 @@ class App:
             ]
 
         win = tk.Toplevel(self.root)
+        apply_ui_theme(win)
+        add_window_header(win, "INVOICE")
         win.title("Bluetech Computers - Invoice")
         win.geometry("1050x760")
         win.minsize(900, 620)
@@ -1507,8 +1630,8 @@ class App:
 
         top = ttk.Frame(win, padding=10)
         top.pack(fill="x")
-        ttk.Label(top, text="BLUETECH COMPUTERS - INVOICE", font=("Segoe UI", 30, "bold")).pack(side="left")
-        ttk.Label(top, text=f"SOLD BY: {self.prepared_by.get()}", font=("Segoe UI", 15)).pack(side="right")
+        ttk.Label(top, text="INVOICE DETAILS", font=("Segoe UI", 18, "bold")).pack(side="left")
+        ttk.Label(top, text=f"Prepared by {self.prepared_by.get()}", font=("Segoe UI", 10)).pack(side="right")
 
         info = ttk.LabelFrame(win, text="Invoice Details", padding=8)
         info.pack(fill="x", padx=10, pady=4)
@@ -1530,7 +1653,9 @@ class App:
         show_unit_price = tk.BooleanVar(value=get_setting("invoice_show_unit_price", "1") == "1")
         ttk.Label(controls, text="SHOW UNIT PRICE:", font=("Segoe UI", 9, "bold")).pack(side="left")
         unit_price_toggle = tk.Button(controls, text="ON" if show_unit_price.get() else "OFF", width=7,
-                                      font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2")
+                                      font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
+                                      bg="#0878D1", fg="white", activebackground="#0565B3",
+                                      activeforeground="white", padx=8, pady=4)
         unit_price_toggle.pack(side="left", padx=(5, 18))
         def toggle_unit_price():
             show_unit_price.set(not show_unit_price.get())
@@ -1774,7 +1899,8 @@ class App:
             printers=[p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL|win32print.PRINTER_ENUM_CONNECTIONS)]
             if not printers:
                 messagebox.showerror("Printer","No Windows printers were found.",parent=win); return
-            pw=tk.Toplevel(win); pw.title("Select Printer"); pw.geometry("520x180")
+            pw=tk.Toplevel(win); apply_ui_theme(pw); add_window_header(pw, "SELECT PRINTER")
+            pw.title("Select Printer"); pw.geometry("520x225")
             pw.transient(win)
             pw.grab_set()
             pw.focus_force()
@@ -1785,8 +1911,25 @@ class App:
             ttk.Combobox(pw,textvariable=pv,values=printers,state="readonly",width=58).pack(padx=15,fill="x")
             def do_print():
                 lines=[]
-                def line(s=""): lines.append(str(s)[:95])
-                line("BLUETECH COMPUTERS"); line("COMPUTER SALES | REPAIRS | UPGRADES")
+                # Dot-matrix RAW printing: keep every line inside the printable
+                # 80-column width instead of allowing long warranty text to wrap
+                # unpredictably at the printer.
+                RAW_WIDTH = 78
+                def line(s=""):
+                    text = str(s)
+                    if not text:
+                        lines.append("")
+                        return
+                    wrapped = textwrap.wrap(
+                        text,
+                        width=RAW_WIDTH,
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                        replace_whitespace=False,
+                        drop_whitespace=True,
+                    )
+                    lines.extend(wrapped or [""])
+                line("COMPUTER SALES | REPAIRS | UPGRADES")
                 line("230, 1st Floor, Lakyanya Plaza, Highlevel Road, Maharagama"); line("077 633 7942 / 074 394 6233"); line("="*80)
                 line(f"INVOICE NO : {invoice_no.get()}    DATE : {invoice_date.get()}"); line(f"SOLD BY    : {self.prepared_by.get()}"); line(""); line(f"CUSTOMER   : {customer.get()[:65]}") ; line(f"PHONE      : {phone.get()[:65]}")
                 if invoice_title.get().strip(): line(f"TITLE      : {invoice_title.get()[:65]}")
@@ -1805,11 +1948,24 @@ class App:
                 line("WARRANTY CONDITIONS")
                 for part in get_setting("invoice_warranty_conditions","").replace("\\n","\n").splitlines(): line(part)
                 line("Thank you for your business!")
-                data="\r\n".join(lines)+"\r\n\f"
+                # Epson ESC/P printer formatting. RAW mode does not understand
+                # ReportLab/PDF point sizes, so explicitly enlarge the Bluetech
+                # heading at the printer. This gives the requested large heading
+                # on the dot-matrix printer instead of falling back to normal size.
+                ESC = b"\x1b"
+                data = bytearray()
+                data += ESC + b"@"       # initialize printer
+                data += ESC + b"M"       # 12 cpi
+                data += ESC + b"E"       # bold on
+                data += ESC + b"W1"      # double width
+                data += ESC + b"w1"      # double height
+                data += b"BLUETECH COMPUTERS\r\n"
+                data += ESC + b"w0" + ESC + b"W0" + ESC + b"F"
+                data += ("\r\n".join(lines) + "\r\n\f").encode("cp437", errors="replace")
                 try:
                     h=win32print.OpenPrinter(pv.get())
                     try:
-                        win32print.StartDocPrinter(h,1,(invoice_no.get(),None,"RAW")); win32print.StartPagePrinter(h); win32print.WritePrinter(h,data.encode("cp437",errors="replace")); win32print.EndPagePrinter(h); win32print.EndDocPrinter(h)
+                        win32print.StartDocPrinter(h,1,(invoice_no.get(),None,"RAW")); win32print.StartPagePrinter(h); win32print.WritePrinter(h,bytes(data)); win32print.EndPagePrinter(h); win32print.EndDocPrinter(h)
                     finally: win32print.ClosePrinter(h)
                     messagebox.showinfo("Invoice",f"Invoice sent to {pv.get()}.",parent=pw); pw.destroy()
                 except Exception as e: messagebox.showerror("Printer",f"Could not print invoice:\n{e}",parent=pw)
@@ -1820,9 +1976,9 @@ class App:
             save_invoice_pdf()
 
         ttk.Button(actions,text="CLOSE",command=win.destroy).pack(side="right",padx=5)
-        ttk.Button(actions,text="SAVE INVOICE PDF",command=save_invoice_pdf).pack(side="right",padx=5)
-        ttk.Button(actions,text="PREVIEW INVOICE",command=preview_invoice).pack(side="right",padx=5)
-        ttk.Button(actions,text="PRINT INVOICE",command=print_invoice).pack(side="right",padx=5)
+        ttk.Button(actions,text="SAVE INVOICE PDF",style="Blue.TButton",command=save_invoice_pdf).pack(side="right",padx=5)
+        ttk.Button(actions,text="PREVIEW INVOICE",style="Light.TButton",command=preview_invoice).pack(side="right",padx=5)
+        ttk.Button(actions,text="PRINT INVOICE",style="Green.TButton",command=print_invoice).pack(side="right",padx=5)
 
     def whatsapp_quotation(self):
         if not self.customer.get().strip():
@@ -1863,8 +2019,348 @@ class App:
         except Exception as e:
             messagebox.showerror("WhatsApp", f"Could not open WhatsApp:\n{e}")
 
+    def refresh_product_master(self):
+        c = db()
+        self.product_master = c.execute(
+            "SELECT product, cost, description FROM product_master ORDER BY product COLLATE NOCASE"
+        ).fetchall()
+        c.close()
+
+    def import_product_excel(self, parent, status_var):
+        if openpyxl is None:
+            messagebox.showerror(
+                "Product Master",
+                "Excel support is not installed. Please install openpyxl.",
+                parent=parent
+            )
+            return
+        path = filedialog.askopenfilename(
+            title="Select Stock Report Excel",
+            filetypes=[("Excel files", "*.xlsx *.xlsm"), ("All files", "*.*")],
+            parent=parent
+        )
+        if not path:
+            return
+        try:
+            wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+            ws = wb.active
+            rows = ws.iter_rows(values_only=True)
+            header = next(rows, None)
+            if not header:
+                raise ValueError("The Excel file is empty.")
+
+            headers = {str(v).strip().upper(): i for i, v in enumerate(header) if v is not None}
+            name_idx = headers.get("NAME")
+            cost_idx = headers.get("COST PRICE")
+            desc_idx = headers.get("DESCRIPTION")
+            if name_idx is None:
+                raise ValueError("The Excel file must contain a 'NAME' column.")
+            if cost_idx is None:
+                raise ValueError("The Excel file must contain a 'COST PRICE' column.")
+
+            imported = 0
+            skipped = 0
+            c = db()
+            for row in rows:
+                if not row or name_idx >= len(row):
+                    skipped += 1
+                    continue
+                name = str(row[name_idx] or "").strip().upper()
+                if not name:
+                    skipped += 1
+                    continue
+                raw_cost = row[cost_idx] if cost_idx < len(row) else 0
+                try:
+                    if isinstance(raw_cost, (int, float)):
+                        cost = float(raw_cost)
+                    else:
+                        cost = float(str(raw_cost or "0").replace(",", "").replace("Rs.", "").replace("LKR", "").strip() or 0)
+                except Exception:
+                    cost = 0.0
+                description = ""
+                if desc_idx is not None and desc_idx < len(row):
+                    description = str(row[desc_idx] or "").strip().upper()
+                c.execute(
+                    """INSERT INTO product_master(product,cost,description) VALUES(?,?,?)
+                       ON CONFLICT(product) DO UPDATE SET cost=excluded.cost, description=excluded.description""",
+                    (name, cost, description)
+                )
+                imported += 1
+            c.commit()
+            c.close()
+            wb.close()
+            self.refresh_product_master()
+            status_var.set(f"Loaded {len(self.product_master):,} products from {os.path.basename(path)}")
+            messagebox.showinfo(
+                "Product Master",
+                f"Product master updated successfully.\n\nProducts available: {len(self.product_master):,}",
+                parent=parent
+            )
+        except Exception as e:
+            try:
+                wb.close()
+            except Exception:
+                pass
+            messagebox.showerror("Product Master", f"Could not import Excel:\n{e}", parent=parent)
+
+    def clear_product_master(self, parent, status_var):
+        if not self.product_master:
+            status_var.set("No product master loaded.")
+            return
+        if not messagebox.askyesno(
+            "Product Master", "Clear all imported products and cost prices?", parent=parent
+        ):
+            return
+        c = db()
+        c.execute("DELETE FROM product_master")
+        c.commit()
+        c.close()
+        self.refresh_product_master()
+        self.hide_product_suggestions()
+        status_var.set("Product master cleared.")
+
+    def _product_matches(self, text):
+        term = str(text or "").strip().upper()
+        if not term:
+            return []
+        starts = []
+        contains = []
+        for product, cost, description in self.product_master:
+            p = str(product or "")
+            if p.startswith(term):
+                starts.append((p, cost, description))
+            elif term in p:
+                contains.append((p, cost, description))
+        return (starts + contains)[:12]
+
+    def _show_product_suggestions(self, entry, matches):
+        self.hide_product_suggestions()
+        if not matches:
+            return
+        self._product_popup_entry = entry
+        self._product_popup_items = matches
+
+        popup = tk.Toplevel(self.root)
+        apply_ui_theme(popup)
+        self._product_popup = popup
+        popup.overrideredirect(True)
+        popup.configure(bg="#B9D7EF")
+        # Do not make the suggestion window topmost/transient. Keeping keyboard
+        # focus in the Entry makes Up/Down/Enter immediate and avoids the short
+        # focus delay that occurred after selecting a suggestion with the mouse.
+        try:
+            popup.wm_attributes("-topmost", False)
+        except Exception:
+            pass
+
+        x = entry.winfo_rootx()
+        y = entry.winfo_rooty() + entry.winfo_height()
+        width = max(entry.winfo_width(), 360)
+        height = min(300, 28 * len(matches) + 4)
+        popup.geometry(f"{width}x{height}+{x}+{y}")
+
+        lb = tk.Listbox(
+            popup,
+            activestyle="none",
+            selectmode="browse",
+            height=min(10, len(matches)),
+            font=("Segoe UI", 9),
+            bg="#FFFFFF",
+            fg="#17324D",
+            selectbackground="#0878D1",
+            selectforeground="#FFFFFF",
+            relief="solid",
+            bd=1,
+            highlightthickness=0,
+            takefocus=0,
+        )
+        lb.pack(fill="both", expand=True, padx=1, pady=1)
+        for product, cost, _ in matches:
+            lb.insert("end", f"{product}    |    Cost: LKR {float(cost or 0):,.2f}")
+        lb.selection_set(0)
+        lb.activate(0)
+        lb.bind("<ButtonRelease-1>", lambda e: self._choose_product_suggestion(
+            entry, lb.curselection()[0] if lb.curselection() else 0
+        ))
+        lb.bind("<Escape>", lambda e: self.hide_product_suggestions())
+        popup.bind("<Escape>", lambda e: self.hide_product_suggestions())
+        popup.update_idletasks()
+        # Explicitly return focus to the description Entry after the popup is
+        # created; the popup itself never becomes the keyboard target.
+        entry.focus_set()
+        entry.icursor(tk.END)
+
+    def _product_root_click(self, event):
+        """Hide autocomplete when clicking outside the active product entry/popup."""
+        popup = self._product_popup
+        entry = self._product_popup_entry
+        if popup is None or entry is None:
+            return
+        try:
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+            if widget is entry:
+                return
+            w = widget
+            while w is not None:
+                if w is popup:
+                    return
+                try:
+                    w = w.master
+                except Exception:
+                    break
+        except Exception:
+            pass
+        self.hide_product_suggestions()
+
+    def hide_product_suggestions(self):
+        popup = self._product_popup
+        self._product_popup = None
+        self._product_popup_entry = None
+        self._product_popup_items = []
+        if popup is not None:
+            try:
+                popup.destroy()
+            except Exception:
+                pass
+
+    def _description_popup_navigation(self, event, entry):
+        if self._product_popup is not None and self._product_popup_entry is entry:
+            lb = self._product_popup.winfo_children()[0]
+            cur = lb.curselection()
+            idx = cur[0] if cur else 0
+            if event.keysym == "Down":
+                idx = min(idx + 1, lb.size() - 1)
+            else:
+                idx = max(idx - 1, 0)
+            lb.selection_clear(0, "end")
+            lb.selection_set(idx)
+            lb.activate(idx)
+            return "break"
+        return self._move_table_arrow_focus(entry, -1 if event.keysym == "Up" else 1)
+
+    def _description_popup_return(self, event, entry):
+        if self._product_popup is not None and self._product_popup_entry is entry:
+            lb = self._product_popup.winfo_children()[0]
+            cur = lb.curselection()
+            if cur:
+                return self._choose_product_suggestion(entry, cur[0])
+        return self.focus_next_or_cost(entry, 1, 3)
+
+    def _description_popup_escape(self, event):
+        if self._product_popup is not None:
+            self.hide_product_suggestions()
+            return "break"
+        return None
+
+    def _choose_product_suggestion(self, entry, index):
+        if self._product_popup_entry is not entry or not self._product_popup_items:
+            return "break"
+        index = max(0, min(index, len(self._product_popup_items) - 1))
+        product, cost, description = self._product_popup_items[index]
+        for row in self.rows:
+            if entry in row[4]:
+                # Autocomplete fills DESCRIPTION; PRODUCT remains the category field.
+                row[1].set(product)
+                row[3].set(f"{float(cost or 0):g}")
+                break
+
+        # Destroy the popup first, then restore focus on the next idle cycle.
+        # This prevents the short UI freeze caused by a Toplevel focus transition.
+        self.hide_product_suggestions()
+        try:
+            self.root.after_idle(lambda: self._restore_description_focus(entry))
+        except Exception:
+            entry.focus_set()
+            entry.icursor(tk.END)
+        self.recalc()
+        return "break"
+
+    def _restore_description_focus(self, entry):
+        try:
+            if entry.winfo_exists():
+                entry.focus_set()
+                entry.icursor(tk.END)
+        except Exception:
+            pass
+
+    def edit_product_master(self, parent):
+        win = tk.Toplevel(parent)
+        apply_ui_theme(win)
+        add_window_header(win, "PRODUCT MASTER")
+        win.title("Product Master - View / Edit")
+        win.geometry("900x600")
+        win.minsize(760, 480)
+        win.transient(parent)
+        win.grab_set()
+        outer = ttk.Frame(win, padding=10)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="PRODUCT MASTER / STOCK REPORT", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 6))
+        ttk.Label(outer, text="Double-click a row to edit NAME, COST PRICE or DESCRIPTION. Changes are saved to the local product master.", foreground=GREY).pack(anchor="w", pady=(0, 8))
+        frame = ttk.Frame(outer); frame.pack(fill="both", expand=True)
+        tree = ttk.Treeview(frame, columns=("product","cost","description"), show="headings", selectmode="browse")
+        tree.heading("product", text="NAME / PRODUCT"); tree.heading("cost", text="COST PRICE"); tree.heading("description", text="DESCRIPTION")
+        tree.column("product", width=390); tree.column("cost", width=140, anchor="e"); tree.column("description", width=300)
+        vsb=ttk.Scrollbar(frame, orient="vertical", command=tree.yview); tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True); vsb.pack(side="right", fill="y")
+        def refresh():
+            self.refresh_product_master(); tree.delete(*tree.get_children())
+            for product,cost,description in self.product_master:
+                tree.insert("", "end", values=(product, f"{float(cost or 0):g}", description or ""))
+        def edit_selected(_event=None):
+            sel=tree.selection()
+            if not sel: return
+            vals=tree.item(sel[0], "values"); old=str(vals[0])
+            ed=tk.Toplevel(win); apply_ui_theme(ed); add_window_header(ed, "EDIT PRODUCT"); ed.title("Edit Product Master Item"); ed.geometry("560x240"); ed.transient(win); ed.grab_set()
+            body=ttk.Frame(ed,padding=12); body.pack(fill="both",expand=True)
+            pv=tk.StringVar(value=old); cv=tk.StringVar(value=str(vals[1])); dv=tk.StringVar(value=str(vals[2]))
+            for r,(lab,var) in enumerate((("Product Name",pv),("Cost Price",cv),("Description",dv))):
+                ttk.Label(body,text=lab).grid(row=r,column=0,sticky="w",pady=5); ttk.Entry(body,textvariable=var,width=55).grid(row=r,column=1,sticky="ew",pady=5)
+            body.columnconfigure(1,weight=1)
+            def save():
+                product=pv.get().strip().upper()
+                if not product: messagebox.showwarning("Product Master","Product Name is required.",parent=ed); return
+                try: cost=float(cv.get().replace(",","").strip() or 0)
+                except ValueError: messagebox.showwarning("Product Master","Cost Price must be a number.",parent=ed); return
+                c=db()
+                try: c.execute("UPDATE product_master SET product=?,cost=?,description=? WHERE product=? COLLATE NOCASE",(product,cost,dv.get().strip().upper(),old)); c.commit()
+                except sqlite3.IntegrityError: c.close(); messagebox.showwarning("Product Master","That Product Name already exists.",parent=ed); return
+                c.close(); self.refresh_product_master(); refresh(); ed.destroy()
+            ttk.Button(body,text="SAVE",style="Blue.TButton",command=save).grid(row=3,column=1,sticky="e",pady=(12,0)); ed.bind("<Return>",lambda e:save()); ed.bind("<Escape>",lambda e:ed.destroy()); ed.focus_force()
+        def add_item():
+            ed=tk.Toplevel(win); apply_ui_theme(ed); add_window_header(ed, "ADD PRODUCT"); ed.title("Add Product Master Item"); ed.geometry("560x240"); ed.transient(win); ed.grab_set()
+            body=ttk.Frame(ed,padding=12); body.pack(fill="both",expand=True); pv=tk.StringVar(); cv=tk.StringVar(value="0"); dv=tk.StringVar()
+            for r,(lab,var) in enumerate((("Product Name",pv),("Cost Price",cv),("Description",dv))):
+                ttk.Label(body,text=lab).grid(row=r,column=0,sticky="w",pady=5); ttk.Entry(body,textvariable=var,width=55).grid(row=r,column=1,sticky="ew",pady=5)
+            body.columnconfigure(1,weight=1)
+            def save():
+                product=pv.get().strip().upper()
+                if not product: messagebox.showwarning("Product Master","Product Name is required.",parent=ed); return
+                try: cost=float(cv.get().replace(",","").strip() or 0)
+                except ValueError: messagebox.showwarning("Product Master","Cost Price must be a number.",parent=ed); return
+                c=db()
+                try: c.execute("INSERT INTO product_master(product,cost,description) VALUES(?,?,?)",(product,cost,dv.get().strip().upper())); c.commit()
+                except sqlite3.IntegrityError: c.close(); messagebox.showwarning("Product Master","That Product Name already exists.",parent=ed); return
+                c.close(); self.refresh_product_master(); refresh(); ed.destroy()
+            ttk.Button(body,text="ADD",style="Blue.TButton",command=save).grid(row=3,column=1,sticky="e",pady=(12,0)); ed.bind("<Return>",lambda e:save()); ed.bind("<Escape>",lambda e:ed.destroy()); ed.focus_force()
+        def delete_selected():
+            sel=tree.selection()
+            if not sel: messagebox.showwarning("Product Master","Select a product first.",parent=win); return
+            product=str(tree.item(sel[0],"values")[0])
+            if not messagebox.askyesno("Product Master",f"Delete this product?\n\n{product}",parent=win): return
+            c=db(); c.execute("DELETE FROM product_master WHERE product=? COLLATE NOCASE",(product,)); c.commit(); c.close(); self.refresh_product_master(); refresh()
+        tree.bind("<Double-1>",edit_selected)
+        btns=ttk.Frame(outer); btns.pack(fill="x",pady=(8,0))
+        ttk.Button(btns,text="ADD PRODUCT",style="Blue.TButton",command=add_item).pack(side="left",padx=(0,6))
+        ttk.Button(btns,text="EDIT SELECTED",command=edit_selected).pack(side="left",padx=6)
+        ttk.Button(btns,text="DELETE SELECTED",style="Danger.TButton",command=delete_selected).pack(side="left",padx=6)
+        ttk.Button(btns,text="REFRESH",command=refresh).pack(side="left",padx=6)
+        ttk.Button(btns,text="CLOSE",command=win.destroy).pack(side="right")
+        refresh(); win.focus_force()
+
     def settings(self):
         win = tk.Toplevel(self.root)
+        apply_ui_theme(win)
+        add_window_header(win, "SETTINGS")
         win.title("Settings")
         win.geometry("900x720")
         win.minsize(860, 650)
@@ -1931,6 +2427,20 @@ class App:
         ub=ttk.Frame(body); ub.pack(pady=6)
         ttk.Button(ub,text="ADD USER",command=add_user).pack(side="left",padx=4)
         ttk.Button(ub,text="DELETE USER",command=delete_user).pack(side="left",padx=4)
+
+        ttk.Separator(body).pack(fill="x", pady=10)
+        ttk.Label(body, text="PRODUCT MASTER / STOCK REPORT", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2, 8))
+        product_status = tk.StringVar(value=f"Products loaded: {len(self.product_master):,}")
+        pm_row = ttk.Frame(body); pm_row.pack(fill="x")
+        ttk.Button(pm_row, text="IMPORT STOCK REPORT EXCEL", style="Blue.TButton",
+                   command=lambda: self.import_product_excel(win, product_status)).pack(side="left", padx=(0, 6))
+        ttk.Button(pm_row, text="CLEAR PRODUCT MASTER",
+                   command=lambda: self.clear_product_master(win, product_status)).pack(side="left")
+        ttk.Button(pm_row, text="VIEW / EDIT PRODUCT MASTER", style="Blue.TButton",
+                   command=lambda: self.edit_product_master(win)).pack(side="left", padx=(6, 0))
+        ttk.Label(body, textvariable=product_status, foreground=GREY).pack(anchor="w", pady=(6, 2))
+        ttk.Label(body, text="Uses NAME as the stock product suggestion and COST PRICE as the default Cost. Suggestions appear in DESCRIPTION; manual descriptions are still allowed.",
+                  foreground=GREY, wraplength=820).pack(anchor="w", pady=(0, 4))
 
         ttk.Separator(body).pack(fill="x", pady=10)
         ttk.Label(body, text="COD Settings", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(2,8))
@@ -2019,6 +2529,8 @@ class App:
 
     def history(self):
         win = tk.Toplevel(self.root)
+        apply_ui_theme(win)
+        add_window_header(win, "QUOTATION HISTORY")
         win.title("Quotation History")
         win.geometry("1160x650")
         win.transient(self.root)
@@ -2099,7 +2611,7 @@ class App:
         btns.pack(pady=6)
 
         ttk.Button(
-            btns, text="OPEN / EDIT SELECTED",
+            btns, text="OPEN / EDIT SELECTED", style="Blue.TButton",
             command=lambda: self.load_history_item(tree, win)
         ).pack(side="left", padx=5)
 
@@ -2109,7 +2621,7 @@ class App:
         ).pack(side="left", padx=5)
 
         ttk.Button(
-            btns, text="WHATSAPP",
+            btns, text="WHATSAPP", style="Green.TButton",
             command=lambda: self.whatsapp_history_item(tree, win)
         ).pack(side="left", padx=5)
 
