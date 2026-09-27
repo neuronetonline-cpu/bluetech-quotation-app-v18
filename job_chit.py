@@ -5,8 +5,14 @@ import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+try:
+    import win32print
+except Exception:
+    win32print = None
 from datetime import datetime
 from xml.sax.saxutils import escape
+from ui_theme import add_window_header, apply_ui_theme, COLORS
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
@@ -57,10 +63,11 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
         if qid is None: return
         con = db(); saved = con.execute('SELECT * FROM job_chits WHERE quotation_id=? ORDER BY id DESC LIMIT 1', (qid,)).fetchone(); con.close()
 
-    win = tk.Toplevel(app.root); win.title('Bluetech Computers - PC Build Job Sheet')
+    win = tk.Toplevel(app.root); apply_ui_theme(win); add_window_header(win, 'PC BUILD JOB SHEET')
+    win.title('Bluetech Computers - PC Build Job Sheet')
     win.geometry('1020x780'); win.minsize(780, 550)
     win.transient(app.root); win.grab_set(); win.focus_force()
-    win.configure(bg='#F3F7FC')
+    win.configure(bg=COLORS['background'])
     outer = ttk.Frame(win); outer.pack(fill='both', expand=True)
     canvas = tk.Canvas(outer, highlightthickness=0, bg='#F3F7FC')
     scrollbar = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
@@ -84,8 +91,8 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
         due = ''; status = 'Approved'; items = [list(x[:3]) for x in app.collect_items()]
         checks = {}; staff = {'Prepared By': app.prepared_by.get()}; stamps = {'Prepared By': created}; notes = ''
 
-    ttk.Label(body, text='PC BUILD JOB SHEET', font=('Segoe UI', 19, 'bold'), foreground='#075EAA').pack(anchor='w')
-    ttk.Label(body, text='Internal workshop document — costs and selling prices are excluded.', foreground='#667085').pack(anchor='w', pady=(0,12))
+    ttk.Label(body, text='PC BUILD JOB SHEET', font=('Segoe UI', 19, 'bold'), foreground=COLORS['blue']).pack(anchor='w')
+    ttk.Label(body, text='Internal workshop document — costs and selling prices are excluded.', foreground=COLORS['muted']).pack(anchor='w', pady=(0,12))
     info = ttk.LabelFrame(body, text='JOB / CUSTOMER DETAILS', padding=10); info.pack(fill='x', pady=5)
     def info_row(r, label, val):
         ttk.Label(info, text=label, font=('Segoe UI',9,'bold')).grid(row=r, column=0, sticky='w', pady=4, padx=5)
@@ -357,21 +364,102 @@ def open_job_chit(app, db, get_pdf_dir, job_id=None):
                 else: subprocess.Popen(['xdg-open',path])
             except OSError: pass
     def print_click():
-        path=make_pdf()
-        if not path: return
+        path = make_pdf()
+        if not path:
+            return
         if not sys.platform.startswith('win'):
-            messagebox.showinfo('Print',f'Open the PDF and print it:\n{path}',parent=win); return
-        if messagebox.askyesno('Print Job Sheet','Send the job sheet to your DEFAULT Windows printer?',parent=win):
-            try: os.startfile(path,'print')
-            except OSError as e: messagebox.showerror('Printer',f'Printing failed: {e}\nPDF saved at {path}',parent=win)
+            messagebox.showinfo('Print', f'Open the PDF and print it:\n{path}', parent=win)
+            return
+        if not win32print:
+            messagebox.showerror('Printer',
+                                 'pywin32 / win32print is not available.\n'
+                                 f'PDF saved at {path}', parent=win)
+            return
+        if not messagebox.askyesno('Print Job Sheet',
+                                   'Send the job sheet to your DEFAULT Windows printer?',
+                                   parent=win):
+            return
+        try:
+            printer_name = win32print.GetDefaultPrinter()
+            # Send the PDF-independent workshop text directly to the Windows
+            # printer. This avoids os.startfile(path, "print"), which fails
+            # with WinError 1155 when no PDF application's Print shell verb
+            # is registered. It also works correctly with dot-matrix printers.
+            lines = []
+            def add_line(text=''):
+                lines.append(str(text)[:80])
+
+            ESC = '\x1b'
+            add_line(ESC + '@')
+            add_line(ESC + 'E' + '\x01' + ESC + 'W' + '\x01' + ESC + 'w' + '\x01')
+            add_line('BLUETECH COMPUTERS')
+            add_line(ESC + 'w' + '\x00' + ESC + 'W' + '\x00' + ESC + 'E' + '\x00')
+            add_line('PC BUILD JOB SHEET')
+            add_line('=' * 80)
+            add_line(f'JOB NO        : {number}')
+            add_line(f'QUOTATION NO  : {qno}')
+            add_line(f'CUSTOMER      : {customer}')
+            add_line(f'PHONE         : {phone}')
+            add_line(f'CREATED       : {created}')
+            add_line(f'DUE DATE      : {due_var.get() or "-"}')
+            add_line(f'STATUS        : {status_var.get()}')
+            add_line('-' * 80)
+            add_line(f'{"#":<4}{"PRODUCT":<28}{"DESCRIPTION":<38}{"QTY":>6}')
+            add_line('-' * 80)
+            for i, (prod, desc, qty) in enumerate(current_items(), 1):
+                desc = str(desc or '-')
+                prod = str(prod or 'CUSTOM ITEM')
+                qty_text = str(int(qty)) if isinstance(qty, (int, float)) and float(qty).is_integer() else str(qty)
+                add_line(f'{i:<4}{prod[:28]:<28}{desc[:38]:<38}{qty_text:>6}')
+            add_line('-' * 80)
+            add_line('STAFF / RESPONSIBILITY')
+            for stage in STAGES:
+                add_line(f'{stage:<20}: {staff_vars[stage].get() or "-"}  {time_vars[stage].get() or "-"}')
+            add_line('-' * 80)
+            add_line('BUILD / FINAL CHECKLIST')
+            for item in CHECKS:
+                mark = 'X' if check_vars[item].get() else ' '
+                add_line(f'[{mark}] {item}')
+            add_line('-' * 80)
+            add_line('WORKSHOP REMARKS / SERIAL NUMBERS')
+            remarks_text = remarks.get('1.0', 'end-1c').strip()
+            for part in remarks_text.splitlines() or ['']:
+                add_line(part)
+            add_line('')
+            add_line('WORKSHOP SIGNATURE: ____________________')
+            add_line('FINAL APPROVAL   : ____________________')
+            add_line('')
+            add_line(ESC + 'd' + '\x04')
+            data = '\r\n'.join(lines) + '\r\n\f'
+
+            h = win32print.OpenPrinter(printer_name)
+            try:
+                win32print.StartDocPrinter(h, 1, (f'Job Sheet {number}', None, 'RAW'))
+                try:
+                    win32print.StartPagePrinter(h)
+                    try:
+                        win32print.WritePrinter(h, data.encode('cp437', errors='replace'))
+                    finally:
+                        win32print.EndPagePrinter(h)
+                finally:
+                    win32print.EndDocPrinter(h)
+            finally:
+                win32print.ClosePrinter(h)
+
+            messagebox.showinfo('Printer',
+                                f'Job Sheet sent to: {printer_name}', parent=win)
+        except Exception as e:
+            messagebox.showerror('Printer',
+                                 f'Printing failed: {e}\nPDF saved at {path}',
+                                 parent=win)
     def close_window():
         try: win.grab_release()
         except tk.TclError: pass
         win.destroy()
     actions = ttk.Frame(win,padding=12); actions.pack(fill='x')
-    ttk.Button(actions,text='SAVE JOB SHEET',command=save).pack(side='left',padx=4)
+    ttk.Button(actions,text='SAVE JOB SHEET',style='Blue.TButton',command=save).pack(side='left',padx=4)
     ttk.Button(actions,text='SAVE / PREVIEW PDF',command=pdf_click).pack(side='left',padx=4)
-    ttk.Button(actions,text='PRINT JOB SHEET',command=print_click).pack(side='left',padx=4)
+    ttk.Button(actions,text='PRINT JOB SHEET',style='Green.TButton',command=print_click).pack(side='left',padx=4)
     ttk.Button(actions,text='CLOSE',command=close_window).pack(side='right',padx=4)
 
 
@@ -381,9 +469,10 @@ def app_get_users(db):
 
 def show_job_history(app, db, get_pdf_dir):
     setup_db(db)
-    win=tk.Toplevel(app.root); win.title('Job Sheet History'); win.geometry('1000x560')
+    win=tk.Toplevel(app.root); apply_ui_theme(win); add_window_header(win, 'JOB SHEET HISTORY')
+    win.title('Job Sheet History'); win.geometry('1000x560')
     win.transient(app.root); win.grab_set(); win.focus_force()
-    win.configure(bg='#F3F7FC')
+    win.configure(bg=COLORS['background'])
     search=tk.StringVar(); ttk.Entry(win,textvariable=search).pack(fill='x',padx=12,pady=8)
     tree=ttk.Treeview(win,columns=('job','quote','customer','status','date'),show='headings')
     for col,label in [('job','Job No.'),('quote','Quotation No.'),('customer','Customer'),('status','Status'),('date','Created')]:
@@ -422,8 +511,8 @@ def show_job_history(app, db, get_pdf_dir):
             con.close()
         refresh()
     search.trace_add('write',refresh); refresh()
-    ttk.Button(win,text='OPEN / EDIT / PRINT',command=selected).pack(side='left',padx=12,pady=8)
-    ttk.Button(win,text='DELETE JOB SHEET',command=delete_selected).pack(side='left',padx=12,pady=8)
+    ttk.Button(win,text='OPEN / EDIT / PRINT',style='Blue.TButton',command=selected).pack(side='left',padx=12,pady=8)
+    ttk.Button(win,text='DELETE JOB SHEET',style='Danger.TButton',command=delete_selected).pack(side='left',padx=12,pady=8)
     def close_history():
         try: win.grab_release()
         except tk.TclError: pass
